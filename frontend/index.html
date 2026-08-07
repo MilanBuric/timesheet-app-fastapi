@@ -213,6 +213,20 @@
       <!-- Meetings view -->
       <section id="view-meetings" class="hidden">
         <div class="card">
+          <h2 class="card-title">Meeting invite email</h2>
+          <p class="card-subtitle">Get an email with one-click Accept/Decline links whenever you're invited.</p>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1;">
+              <label for="my-email">Your email</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input type="email" id="my-email" placeholder="you@example.com" style="flex:1;" />
+                <button class="btn btn-primary" onclick="app.saveMyEmail()">Save</button>
+                <span id="email-save-status" class="email-save-status"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
           <h2 class="card-title">Schedule a meeting</h2>
           <div class="form-grid">
             <div class="form-group">
@@ -300,9 +314,8 @@
       <h2 class="card-title">Reject entry</h2>
       <input type="hidden" id="reject-entry-id" />
       <div class="form-group">
-        <label for="reject-reason">Reason (required)</label>
-        <textarea id="reject-reason" class="reject-textarea" rows="3" placeholder="Let the intern know why this was rejected..." required></textarea>
-        <p class="field-error hidden" id="reject-reason-error">Please explain why this entry is being rejected.</p>
+        <label for="reject-reason">Reason</label>
+        <textarea id="reject-reason" class="reject-textarea" rows="3" placeholder="Let the intern know why this was rejected (required)..."></textarea>
       </div>
       <div class="form-actions">
         <button class="btn" onclick="app.closeRejectModal()">Cancel</button>

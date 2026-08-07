@@ -22,6 +22,10 @@ def init_db():
                 created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
             )
         """)
+        # Migration: add email to users created before this column existed
+        user_cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "email" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS entries (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,9 +67,17 @@ def init_db():
             CREATE TABLE IF NOT EXISTS meeting_attendees (
                 meeting_id  INTEGER NOT NULL REFERENCES meetings(id),
                 user_id     INTEGER NOT NULL REFERENCES users(id),
+                status      TEXT    NOT NULL DEFAULT 'pending',
+                rsvp_token  TEXT,
                 PRIMARY KEY (meeting_id, user_id)
             )
         """)
+        # Migration: add status/rsvp_token to meeting_attendees created before these columns existed
+        ma_cols = [r["name"] for r in conn.execute("PRAGMA table_info(meeting_attendees)").fetchall()]
+        if "status" not in ma_cols:
+            conn.execute("ALTER TABLE meeting_attendees ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+        if "rsvp_token" not in ma_cols:
+            conn.execute("ALTER TABLE meeting_attendees ADD COLUMN rsvp_token TEXT")
         conn.commit()
         _seed_users(conn)
 

@@ -1,15 +1,18 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pathlib import Path
+import secrets
 from datetime import datetime, date, timedelta
 from database import get_connection, init_db
 from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     LoginRequest, TokenResponse, UserResponse, UpdateRateRequest,
                     CreateUserRequest, WeeklyReport, WeeklyReportDay, RejectRequest,
-                    BasicUser, MeetingCreate, MeetingResponse)
+                    BasicUser, MeetingCreate, MeetingResponse, UpdateEmailRequest,
+                    RSVPRequest)
 from auth import verify_password, create_token, get_current_user, require_manager
+import email_utils
 
 app = FastAPI(title="Timesheet API")
 
@@ -62,8 +65,17 @@ def me(current_user=Depends(get_current_user)):
         "id": current_user["id"],
         "username": current_user["username"],
         "role": current_user["role"],
-        "hourly_rate": current_user["hourly_rate"]
+        "hourly_rate": current_user["hourly_rate"],
+        "email": current_user["email"]
     }
+
+
+@app.patch("/auth/me/email")
+def update_my_email(body: UpdateEmailRequest, current_user=Depends(get_current_user)):
+    with get_connection() as conn:
+        conn.execute("UPDATE users SET email = ? WHERE id = ?", (body.email, current_user["id"]))
+        conn.commit()
+    return {"email": body.email}
 
 
 # ── Users (manager only) ──────────────────────────────────────────────────────
@@ -501,7 +513,7 @@ def _meeting_with_attendees(conn, meeting_id: int):
     if not m:
         return None
     attendees = conn.execute(
-        """SELECT u.id, u.username FROM meeting_attendees ma
+        """SELECT u.id, u.username, ma.status FROM meeting_attendees ma
            JOIN users u ON ma.user_id = u.id WHERE ma.meeting_id = ?
            ORDER BY u.username""",
         (meeting_id,)
@@ -545,14 +557,38 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
             (current_user["id"], body.title, body.description, body.date, body.start_time, body.end_time)
         )
         meeting_id = cursor.lastrowid
+        invitees = []
         for uid in set(body.attendee_ids) - {current_user["id"]}:
-            if conn.execute("SELECT id FROM users WHERE id = ?", (uid,)).fetchone():
+            attendee = conn.execute("SELECT id, username, email FROM users WHERE id = ?", (uid,)).fetchone()
+            if attendee:
+                token = secrets.token_urlsafe(24)
                 conn.execute(
-                    "INSERT OR IGNORE INTO meeting_attendees (meeting_id, user_id) VALUES (?, ?)",
-                    (meeting_id, uid)
+                    "INSERT OR IGNORE INTO meeting_attendees (meeting_id, user_id, status, rsvp_token) VALUES (?, ?, 'pending', ?)",
+                    (meeting_id, uid, token)
                 )
+                invitees.append(dict(attendee) | {"rsvp_token": token})
         conn.commit()
-        return _meeting_with_attendees(conn, meeting_id)
+        result = _meeting_with_attendees(conn, meeting_id)
+
+    # Send invite emails after the transaction commits; never let a failed
+    # email prevent the meeting itself from being created.
+    for invitee in invitees:
+        if invitee.get("email"):
+            try:
+                email_utils.send_meeting_invite(
+                    to_email=invitee["email"],
+                    attendee_name=invitee["username"],
+                    organizer_name=current_user["username"],
+                    title=body.title,
+                    date=body.date,
+                    start_time=body.start_time,
+                    end_time=body.end_time,
+                    description=body.description,
+                    rsvp_token=invitee["rsvp_token"]
+                )
+            except Exception as exc:
+                print(f"❌ Failed to email {invitee['email']}: {exc}")
+    return result
 
 
 @app.delete("/meetings/{meeting_id}", status_code=204)
@@ -566,3 +602,60 @@ def delete_meeting(meeting_id: int, current_user=Depends(get_current_user)):
         conn.execute("DELETE FROM meeting_attendees WHERE meeting_id = ?", (meeting_id,))
         conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
         conn.commit()
+
+
+@app.post("/meetings/{meeting_id}/rsvp", response_model=MeetingResponse)
+def rsvp_meeting(meeting_id: int, body: RSVPRequest, current_user=Depends(get_current_user)):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM meeting_attendees WHERE meeting_id = ? AND user_id = ?",
+            (meeting_id, current_user["id"])
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="You are not invited to this meeting")
+        conn.execute(
+            "UPDATE meeting_attendees SET status = ? WHERE meeting_id = ? AND user_id = ?",
+            (body.status, meeting_id, current_user["id"])
+        )
+        conn.commit()
+        return _meeting_with_attendees(conn, meeting_id)
+
+
+def _rsvp_confirmation_page(title: str, message: str) -> str:
+    return f"""
+    <html><head><title>{title}</title>
+    <style>
+      body {{ font-family: Arial, sans-serif; display: flex; align-items: center;
+              justify-content: center; height: 100vh; margin: 0; background: #f7f7f8; }}
+      .box {{ background: #fff; padding: 32px 40px; border-radius: 12px;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; max-width: 360px; }}
+      h1 {{ font-size: 18px; margin-bottom: 8px; }}
+      p {{ color: #555; font-size: 14px; }}
+    </style></head>
+    <body><div class="box"><h1>{title}</h1><p>{message}</p></div></body></html>
+    """
+
+
+@app.get("/meetings/rsvp", response_class=HTMLResponse)
+def rsvp_via_email_link(token: str, action: str):
+    if action not in ("accept", "decline"):
+        return HTMLResponse(_rsvp_confirmation_page("Invalid link", "This RSVP link isn't valid."), status_code=400)
+    status = "accepted" if action == "accept" else "declined"
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM meeting_attendees WHERE rsvp_token = ?", (token,)
+        ).fetchone()
+        if not row:
+            return HTMLResponse(
+                _rsvp_confirmation_page("Link expired", "This RSVP link is invalid or has already been used."),
+                status_code=404
+            )
+        conn.execute(
+            "UPDATE meeting_attendees SET status = ? WHERE meeting_id = ? AND user_id = ?",
+            (status, row["meeting_id"], row["user_id"])
+        )
+        conn.commit()
+        meeting = conn.execute("SELECT title FROM meetings WHERE id = ?", (row["meeting_id"],)).fetchone()
+    title = "You're in! ✅" if status == "accepted" else "Response recorded"
+    message = f'You have {status} the invite to "{meeting["title"] if meeting else "the meeting"}".'
+    return HTMLResponse(_rsvp_confirmation_page(title, message))

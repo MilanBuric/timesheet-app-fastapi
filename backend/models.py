@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import Optional
 from enum import Enum
 
@@ -47,14 +47,6 @@ class EntryResponse(BaseModel):
 class RejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
-    @field_validator("reason")
-    @classmethod
-    def reason_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Reason cannot be blank")
-        return v
-
 
 class StatsResponse(BaseModel):
     hours_today: float
@@ -80,6 +72,11 @@ class UserResponse(BaseModel):
     username: str
     role: str
     hourly_rate: float
+    email: Optional[str] = None
+
+
+class UpdateEmailRequest(BaseModel):
+    email: Optional[str] = Field(None, max_length=254)
 
 
 class UpdateRateRequest(BaseModel):
@@ -124,6 +121,11 @@ class BasicUser(BaseModel):
 class AttendeeInfo(BaseModel):
     id: int
     username: str
+    status: str = "pending"
+
+
+class RSVPRequest(BaseModel):
+    status: str = Field(..., pattern="^(accepted|declined)$")
 
 
 class MeetingCreate(BaseModel):

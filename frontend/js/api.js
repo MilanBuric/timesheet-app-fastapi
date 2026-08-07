@@ -103,8 +103,8 @@ const api = (() => {
     return res.json();
   }
 
-  async function rejectEntry(id, reason) {
-    const res = await request('POST', `/entries/${id}/reject`, { reason });
+  async function rejectEntry(id, reason = '') {
+    const res = await request('POST', `/entries/${id}/reject`, { reason: reason || null });
     if (!res.ok) throw new Error('Failed to reject entry');
     return res.json();
   }
@@ -134,6 +134,18 @@ const api = (() => {
   async function deleteMeeting(id) {
     const res = await request('DELETE', `/meetings/${id}`);
     if (!res.ok) throw new Error('Failed to cancel meeting');
+  }
+
+  async function rsvpMeeting(id, status) {
+    const res = await request('POST', `/meetings/${id}/rsvp`, { status });
+    if (!res.ok) throw new Error('Failed to respond to meeting');
+    return res.json();
+  }
+
+  async function updateMyEmail(email) {
+    const res = await request('PATCH', '/auth/me/email', { email: email || null });
+    if (!res.ok) throw new Error('Failed to update email');
+    return res.json();
   }
 
   async function getStats() {
@@ -175,6 +187,7 @@ const api = (() => {
     getEntries, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
     getStats, getWeeklyReport,
     clockIn, clockOut, getActiveSession,
-    getBasicUsers, getMeetings, createMeeting, deleteMeeting
+    getBasicUsers, getMeetings, createMeeting, deleteMeeting, rsvpMeeting,
+    updateMyEmail
   };
 })();

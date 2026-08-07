@@ -41,8 +41,8 @@ const app = (() => {
     const errEl = document.getElementById('login-error');
     errEl.textContent = '';
     try {
-      const data = await api.login(username, password);
-      currentUser = { id: data.user_id, username: data.username, role: data.role };
+      await api.login(username, password);
+      currentUser = await api.me();
       showApp();
     } catch (err) { errEl.textContent = err.message; }
   }
@@ -176,7 +176,6 @@ const app = (() => {
   function openRejectModal(id) {
     document.getElementById('reject-entry-id').value = id;
     document.getElementById('reject-reason').value = '';
-    document.getElementById('reject-reason-error').classList.add('hidden');
     document.getElementById('reject-modal').classList.remove('hidden');
   }
 
@@ -187,13 +186,10 @@ const app = (() => {
   async function confirmReject() {
     const id = document.getElementById('reject-entry-id').value;
     const reason = document.getElementById('reject-reason').value.trim();
-    const errorEl = document.getElementById('reject-reason-error');
     if (!reason) {
-      errorEl.classList.remove('hidden');
-      document.getElementById('reject-reason').focus();
+      alert('Please provide a reason for rejecting this entry.');
       return;
     }
-    errorEl.classList.add('hidden');
     try {
       await api.rejectEntry(id, reason);
       closeRejectModal();
@@ -570,7 +566,29 @@ const app = (() => {
       if (!document.getElementById('meeting-date').value) {
         document.getElementById('meeting-date').value = today();
       }
+      const emailInput = document.getElementById('my-email');
+      if (emailInput && document.activeElement !== emailInput) {
+        emailInput.value = currentUser.email || '';
+      }
     } catch { alert('Failed to load meetings.'); }
+  }
+
+  async function saveMyEmail() {
+    const email = document.getElementById('my-email').value.trim();
+    try {
+      await api.updateMyEmail(email);
+      currentUser.email = email || null;
+      const status = document.getElementById('email-save-status');
+      status.textContent = 'Saved';
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    } catch { alert('Failed to save email.'); }
+  }
+
+  async function respondToMeeting(id, status) {
+    try {
+      await api.rsvpMeeting(id, status);
+      await loadMeetingsView();
+    } catch { alert('Failed to respond to meeting.'); }
   }
 
   async function scheduleMeeting() {
@@ -633,6 +651,6 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    scheduleMeeting, cancelMeeting
+    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail
   };
 })();

@@ -32,6 +32,15 @@ const meetings = (() => {
     document.querySelectorAll('#meeting-attendees-list input:checked').forEach(el => el.checked = false);
   }
 
+  function statusBadge(status) {
+    const map = {
+      accepted: '<span class="rsvp-badge rsvp-accepted">Accepted</span>',
+      declined: '<span class="rsvp-badge rsvp-declined">Declined</span>',
+      pending: '<span class="rsvp-badge rsvp-pending">Pending</span>'
+    };
+    return map[status] || '';
+  }
+
   function renderList(list, currentUser) {
     const container = document.getElementById('meetings-container');
     if (!list.length) {
@@ -40,6 +49,8 @@ const meetings = (() => {
     }
     container.innerHTML = list.map(m => {
       const canCancel = currentUser.role === 'manager' || m.organizer_id === currentUser.id;
+      const myAttendance = m.attendees.find(a => a.id === currentUser.id);
+      const isInvitee = !!myAttendance && m.organizer_id !== currentUser.id;
       return `
         <div class="meeting-card">
           <div class="meeting-card-header">
@@ -52,7 +63,16 @@ const meetings = (() => {
           <h3 class="meeting-title">${m.title}</h3>
           ${m.description ? `<p class="meeting-desc">${m.description}</p>` : ''}
           <p class="meeting-organizer">Organized by ${m.organizer_username}</p>
-          ${m.attendees.length ? `<div class="meeting-attendees">${m.attendees.map(a => `<span class="attendee-tag">${a.username}</span>`).join('')}</div>` : ''}
+          ${m.attendees.length ? `<div class="meeting-attendees">${m.attendees.map(a =>
+            `<span class="attendee-tag">${a.username} ${statusBadge(a.status)}</span>`
+          ).join('')}</div>` : ''}
+          ${isInvitee && myAttendance.status === 'pending' ? `
+            <div class="rsvp-actions">
+              <button class="btn btn-primary btn-sm" onclick="app.respondToMeeting(${m.id}, 'accepted')">Accept</button>
+              <button class="btn btn-sm" onclick="app.respondToMeeting(${m.id}, 'declined')">Decline</button>
+            </div>` : ''}
+          ${isInvitee && myAttendance.status !== 'pending' ? `
+            <p class="my-rsvp-note">You ${myAttendance.status} this invite.</p>` : ''}
         </div>`;
     }).join('');
   }
