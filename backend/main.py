@@ -258,7 +258,7 @@ def approve_entry(entry_id: int, current_user=Depends(require_manager)):
 
 
 @app.post("/entries/{entry_id}/reject", response_model=EntryResponse)
-def reject_entry(entry_id: int, body: RejectRequest = RejectRequest(), current_user=Depends(require_manager)):
+def reject_entry(entry_id: int, body: RejectRequest, current_user=Depends(require_manager)):
     with get_connection() as conn:
         existing = conn.execute("SELECT * FROM entries WHERE id = ?", (entry_id,)).fetchone()
         if not existing:

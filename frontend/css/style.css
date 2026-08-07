@@ -178,7 +178,7 @@ select {
 
 input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.08); }
 
-.form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1.25rem; }
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 
@@ -682,6 +682,12 @@ svg { display: block; flex-shrink: 0; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 4px;
 }
 
 .reject-textarea {

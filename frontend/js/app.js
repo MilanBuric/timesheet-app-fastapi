@@ -176,6 +176,7 @@ const app = (() => {
   function openRejectModal(id) {
     document.getElementById('reject-entry-id').value = id;
     document.getElementById('reject-reason').value = '';
+    document.getElementById('reject-reason-error').classList.add('hidden');
     document.getElementById('reject-modal').classList.remove('hidden');
   }
 
@@ -186,6 +187,13 @@ const app = (() => {
   async function confirmReject() {
     const id = document.getElementById('reject-entry-id').value;
     const reason = document.getElementById('reject-reason').value.trim();
+    const errorEl = document.getElementById('reject-reason-error');
+    if (!reason) {
+      errorEl.classList.remove('hidden');
+      document.getElementById('reject-reason').focus();
+      return;
+    }
+    errorEl.classList.add('hidden');
     try {
       await api.rejectEntry(id, reason);
       closeRejectModal();

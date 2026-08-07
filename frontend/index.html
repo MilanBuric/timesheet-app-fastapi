@@ -300,8 +300,9 @@
       <h2 class="card-title">Reject entry</h2>
       <input type="hidden" id="reject-entry-id" />
       <div class="form-group">
-        <label for="reject-reason">Reason (optional)</label>
-        <textarea id="reject-reason" class="reject-textarea" rows="3" placeholder="Let the intern know why this was rejected..."></textarea>
+        <label for="reject-reason">Reason (required)</label>
+        <textarea id="reject-reason" class="reject-textarea" rows="3" placeholder="Let the intern know why this was rejected..." required></textarea>
+        <p class="field-error hidden" id="reject-reason-error">Please explain why this entry is being rejected.</p>
       </div>
       <div class="form-actions">
         <button class="btn" onclick="app.closeRejectModal()">Cancel</button>

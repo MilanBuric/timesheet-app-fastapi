@@ -103,8 +103,8 @@ const api = (() => {
     return res.json();
   }
 
-  async function rejectEntry(id, reason = '') {
-    const res = await request('POST', `/entries/${id}/reject`, { reason: reason || null });
+  async function rejectEntry(id, reason) {
+    const res = await request('POST', `/entries/${id}/reject`, { reason });
     if (!res.ok) throw new Error('Failed to reject entry');
     return res.json();
   }

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from enum import Enum
 
@@ -45,7 +45,15 @@ class EntryResponse(BaseModel):
 
 
 class RejectRequest(BaseModel):
-    reason: Optional[str] = Field(None, max_length=500)
+    reason: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Reason cannot be blank")
+        return v
 
 
 class StatsResponse(BaseModel):
