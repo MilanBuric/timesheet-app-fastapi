@@ -7,7 +7,8 @@ from datetime import datetime, date, timedelta
 from database import get_connection, init_db
 from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     LoginRequest, TokenResponse, UserResponse, UpdateRateRequest,
-                    CreateUserRequest, WeeklyReport, WeeklyReportDay)
+                    CreateUserRequest, WeeklyReport, WeeklyReportDay, RejectRequest,
+                    BasicUser, MeetingCreate, MeetingResponse)
 from auth import verify_password, create_token, get_current_user, require_manager
 
 app = FastAPI(title="Timesheet API")
@@ -109,6 +110,16 @@ def delete_user(user_id: int, current_user=Depends(require_manager)):
         conn.execute("DELETE FROM clock_sessions WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
+
+
+@app.get("/users/basic", response_model=list[BasicUser])
+def get_basic_users(current_user=Depends(get_current_user)):
+    """Lightweight user list (id/username/role only) for picking meeting attendees."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, username, role FROM users ORDER BY role, username"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 @app.patch("/users/{user_id}/rate", response_model=UserResponse)
@@ -236,7 +247,7 @@ def approve_entry(entry_id: int, current_user=Depends(require_manager)):
         existing = conn.execute("SELECT * FROM entries WHERE id = ?", (entry_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Entry not found")
-        conn.execute("UPDATE entries SET status = 'approved' WHERE id = ?", (entry_id,))
+        conn.execute("UPDATE entries SET status = 'approved', rejection_reason = NULL WHERE id = ?", (entry_id,))
         conn.commit()
         row = dict(conn.execute(
             "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE e.id = ?",
@@ -247,12 +258,15 @@ def approve_entry(entry_id: int, current_user=Depends(require_manager)):
 
 
 @app.post("/entries/{entry_id}/reject", response_model=EntryResponse)
-def reject_entry(entry_id: int, current_user=Depends(require_manager)):
+def reject_entry(entry_id: int, body: RejectRequest = RejectRequest(), current_user=Depends(require_manager)):
     with get_connection() as conn:
         existing = conn.execute("SELECT * FROM entries WHERE id = ?", (entry_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Entry not found")
-        conn.execute("UPDATE entries SET status = 'rejected' WHERE id = ?", (entry_id,))
+        conn.execute(
+            "UPDATE entries SET status = 'rejected', rejection_reason = ? WHERE id = ?",
+            (body.reason, entry_id)
+        )
         conn.commit()
         row = dict(conn.execute(
             "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE e.id = ?",
@@ -474,3 +488,81 @@ def clock_out(current_user=Depends(get_current_user)):
         conn.commit()
         elapsed = (datetime.utcnow() - datetime.fromisoformat(active["clocked_in_at"])).total_seconds() / 3600
     return {"clocked_in_at": active["clocked_in_at"], "clocked_out_at": now, "hours": max(0.5, round(elapsed * 2) / 2)}
+
+
+# ── Meetings ──────────────────────────────────────────────────────────────────
+
+def _meeting_with_attendees(conn, meeting_id: int):
+    m = conn.execute(
+        """SELECT m.*, u.username as organizer_username FROM meetings m
+           JOIN users u ON m.organizer_id = u.id WHERE m.id = ?""",
+        (meeting_id,)
+    ).fetchone()
+    if not m:
+        return None
+    attendees = conn.execute(
+        """SELECT u.id, u.username FROM meeting_attendees ma
+           JOIN users u ON ma.user_id = u.id WHERE ma.meeting_id = ?
+           ORDER BY u.username""",
+        (meeting_id,)
+    ).fetchall()
+    result = dict(m)
+    result["attendees"] = [dict(a) for a in attendees]
+    return result
+
+
+@app.get("/meetings", response_model=list[MeetingResponse])
+def get_meetings(date_from: str = None, date_to: str = None, current_user=Depends(get_current_user)):
+    # Managers see every meeting; everyone else sees meetings they organize or are invited to
+    query = """SELECT DISTINCT m.id, m.date, m.start_time FROM meetings m
+               LEFT JOIN meeting_attendees ma ON ma.meeting_id = m.id
+               WHERE 1=1"""
+    params = []
+    if current_user["role"] != "manager":
+        query += " AND (m.organizer_id = ? OR ma.user_id = ?)"
+        params.extend([current_user["id"], current_user["id"]])
+    if date_from:
+        query += " AND m.date >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND m.date <= ?"
+        params.append(date_to)
+    query += " ORDER BY m.date, m.start_time"
+
+    with get_connection() as conn:
+        ids = [r["id"] for r in conn.execute(query, params).fetchall()]
+        return [_meeting_with_attendees(conn, mid) for mid in ids]
+
+
+@app.post("/meetings", response_model=MeetingResponse, status_code=201)
+def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
+    if body.end_time <= body.start_time:
+        raise HTTPException(status_code=400, detail="End time must be after start time")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """INSERT INTO meetings (organizer_id, title, description, date, start_time, end_time)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (current_user["id"], body.title, body.description, body.date, body.start_time, body.end_time)
+        )
+        meeting_id = cursor.lastrowid
+        for uid in set(body.attendee_ids) - {current_user["id"]}:
+            if conn.execute("SELECT id FROM users WHERE id = ?", (uid,)).fetchone():
+                conn.execute(
+                    "INSERT OR IGNORE INTO meeting_attendees (meeting_id, user_id) VALUES (?, ?)",
+                    (meeting_id, uid)
+                )
+        conn.commit()
+        return _meeting_with_attendees(conn, meeting_id)
+
+
+@app.delete("/meetings/{meeting_id}", status_code=204)
+def delete_meeting(meeting_id: int, current_user=Depends(get_current_user)):
+    with get_connection() as conn:
+        m = conn.execute("SELECT * FROM meetings WHERE id = ?", (meeting_id,)).fetchone()
+        if not m:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        if current_user["role"] != "manager" and m["organizer_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Only the organizer or a manager can cancel this meeting")
+        conn.execute("DELETE FROM meeting_attendees WHERE meeting_id = ?", (meeting_id,))
+        conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+        conn.commit()

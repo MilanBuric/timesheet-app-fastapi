@@ -56,6 +56,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
           Report
         </a>
+        <a href="#" class="nav-item" data-view="meetings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+          Meetings
+        </a>
         <a href="#" class="nav-item manager-only hidden" data-view="users">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Users
@@ -206,6 +210,46 @@
         </div>
       </section>
 
+      <!-- Meetings view -->
+      <section id="view-meetings" class="hidden">
+        <div class="card">
+          <h2 class="card-title">Schedule a meeting</h2>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="meeting-title">Title</label>
+              <input type="text" id="meeting-title" placeholder="e.g. Sprint planning" />
+            </div>
+            <div class="form-group">
+              <label for="meeting-date">Date</label>
+              <input type="date" id="meeting-date" />
+            </div>
+            <div class="form-group">
+              <label for="meeting-start">Start time</label>
+              <input type="time" id="meeting-start" />
+            </div>
+            <div class="form-group">
+              <label for="meeting-end">End time</label>
+              <input type="time" id="meeting-end" />
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label for="meeting-description">Description</label>
+              <input type="text" id="meeting-description" placeholder="Optional details" />
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Attendees</label>
+              <div id="meeting-attendees-list" class="attendees-list"></div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" onclick="app.scheduleMeeting()">Schedule meeting</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Meetings</h2>
+          <div id="meetings-container"></div>
+        </div>
+      </section>
+
       <!-- Users view (manager only) -->
       <section id="view-users" class="hidden">
         <div class="card">
@@ -250,9 +294,26 @@
     </div>
   </div>
 
+  <!-- Reject modal -->
+  <div class="modal-overlay hidden" id="reject-modal">
+    <div class="modal">
+      <h2 class="card-title">Reject entry</h2>
+      <input type="hidden" id="reject-entry-id" />
+      <div class="form-group">
+        <label for="reject-reason">Reason (optional)</label>
+        <textarea id="reject-reason" class="reject-textarea" rows="3" placeholder="Let the intern know why this was rejected..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="app.closeRejectModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="app.confirmReject()">Reject entry</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/js/api.js"></script>
   <script src="/static/js/timer.js"></script>
   <script src="/static/js/entries.js"></script>
+  <script src="/static/js/meetings.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>

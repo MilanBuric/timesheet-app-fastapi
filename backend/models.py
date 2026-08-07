@@ -39,8 +39,13 @@ class EntryResponse(BaseModel):
     category: str
     hours: float
     status: str
+    rejection_reason: Optional[str] = None
     overtime: bool = False
     created_at: str
+
+
+class RejectRequest(BaseModel):
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 class StatsResponse(BaseModel):
@@ -100,3 +105,36 @@ class WeeklyReport(BaseModel):
     hourly_rate: float
     total_pay: float
     entries: list[EntryResponse]
+
+
+class BasicUser(BaseModel):
+    id: int
+    username: str
+    role: str
+
+
+class AttendeeInfo(BaseModel):
+    id: int
+    username: str
+
+
+class MeetingCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    attendee_ids: list[int] = []
+
+
+class MeetingResponse(BaseModel):
+    id: int
+    organizer_id: int
+    organizer_username: str
+    title: str
+    description: Optional[str] = None
+    date: str
+    start_time: str
+    end_time: str
+    attendees: list[AttendeeInfo] = []
+    created_at: str

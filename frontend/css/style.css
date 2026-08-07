@@ -206,6 +206,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 
 .btn-primary:hover { background: var(--accent-text); border-color: var(--accent-text); }
 
+.btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
+
 .btn-clock { background: var(--success-bg); color: var(--success); border-color: var(--success); }
 .btn-clock.clocked-in { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
 
@@ -667,4 +670,126 @@ svg { display: block; flex-shrink: 0; }
   border-radius: var(--radius);
   margin-bottom: 1.25rem;
   border: 1px solid var(--border);
+}
+
+/* ── Rejection reason ─────────────────────────────────────────────────────── */
+
+.rejection-note {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reject-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+/* ── Meetings ─────────────────────────────────────────────────────────────── */
+
+.attendees-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attendees-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.attendee-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--surface);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.attendee-chip:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+
+.attendee-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+}
+
+.meeting-card {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.meeting-card:last-child { margin-bottom: 0; }
+
+.meeting-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.meeting-date {
+  font-weight: 500;
+  margin-right: 8px;
+}
+
+.meeting-time {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.meeting-title {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.meeting-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.meeting-organizer {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.meeting-attendees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attendee-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
 }

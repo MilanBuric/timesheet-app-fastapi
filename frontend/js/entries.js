@@ -63,12 +63,12 @@ const entries = (() => {
                 <td>${e.activity} ${e.overtime ? overtimeIcon() : ''}</td>
                 <td><span class="badge badge-${badgeClass(e.category)}">${e.category}</span></td>
                 <td class="td-hours">${e.hours}h</td>
-                <td>${statusBadge(e.status)}</td>
+                <td>${statusBadge(e.status)}${e.status === 'rejected' && e.rejection_reason ? `<div class="rejection-note" title="${e.rejection_reason.replace(/"/g, '&quot;')}">${e.rejection_reason}</div>` : ''}</td>
                 <td>
                   <div class="td-actions">
                     ${isManager ? `
                       <button class="btn-icon success" onclick="app.approveEntry(${e.id})" title="Approve">${checkIcon()}</button>
-                      <button class="btn-icon danger" onclick="app.rejectEntry(${e.id})" title="Reject">${xIcon()}</button>
+                      <button class="btn-icon danger" onclick="app.openRejectModal(${e.id})" title="Reject">${xIcon()}</button>
                     ` : `
                       <button class="btn-icon" onclick="app.openEdit(${JSON.stringify(e).replace(/"/g, '&quot;')})" aria-label="Edit">${editIcon()}</button>
                       <button class="btn-icon danger" onclick="app.deleteEntry(${e.id})" aria-label="Delete">${trashIcon()}</button>

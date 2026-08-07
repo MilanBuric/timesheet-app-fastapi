@@ -76,13 +76,14 @@ const app = (() => {
         const view = link.dataset.view;
         document.querySelectorAll('.nav-item').forEach(l => l.classList.remove('active'));
         link.classList.add('active');
-        ['dashboard', 'entries', 'report', 'users'].forEach(v => {
+        ['dashboard', 'entries', 'report', 'meetings', 'users'].forEach(v => {
           document.getElementById(`view-${v}`).classList.toggle('hidden', view !== v);
         });
-        const titles = { dashboard: 'Dashboard', entries: 'Entries', report: 'Report', users: 'Users' };
+        const titles = { dashboard: 'Dashboard', entries: 'Entries', report: 'Report', meetings: 'Meetings', users: 'Users' };
         document.getElementById('view-title').textContent = titles[view];
         if (view === 'entries') quickFilter('week');
         if (view === 'report') { reportOffset = 0; renderReport(); }
+        if (view === 'meetings') loadMeetingsView();
         if (view === 'users') loadUsers();
       });
     });
@@ -172,11 +173,24 @@ const app = (() => {
     } catch { alert('Failed to approve.'); }
   }
 
-  async function rejectEntry(id) {
+  function openRejectModal(id) {
+    document.getElementById('reject-entry-id').value = id;
+    document.getElementById('reject-reason').value = '';
+    document.getElementById('reject-modal').classList.remove('hidden');
+  }
+
+  function closeRejectModal() {
+    document.getElementById('reject-modal').classList.add('hidden');
+  }
+
+  async function confirmReject() {
+    const id = document.getElementById('reject-entry-id').value;
+    const reason = document.getElementById('reject-reason').value.trim();
     try {
-      await api.rejectEntry(id);
+      await api.rejectEntry(id, reason);
+      closeRejectModal();
       await Promise.all([loadRecentEntries(), loadEntries()]);
-    } catch { alert('Failed to reject.'); }
+    } catch { alert('Failed to reject entry.'); }
   }
 
   // ── Quick filters ─────────────────────────────────────────────────────────
@@ -538,6 +552,47 @@ const app = (() => {
     } catch { alert('Failed to save rate.'); }
   }
 
+  // ── Meetings ──────────────────────────────────────────────────────────────
+
+  async function loadMeetingsView() {
+    try {
+      const [users, list] = await Promise.all([api.getBasicUsers(), api.getMeetings()]);
+      meetings.renderAttendeeOptions(users, currentUser.id);
+      meetings.renderList(list, currentUser);
+      if (!document.getElementById('meeting-date').value) {
+        document.getElementById('meeting-date').value = today();
+      }
+    } catch { alert('Failed to load meetings.'); }
+  }
+
+  async function scheduleMeeting() {
+    const title = document.getElementById('meeting-title').value.trim();
+    const date = document.getElementById('meeting-date').value;
+    const start_time = document.getElementById('meeting-start').value;
+    const end_time = document.getElementById('meeting-end').value;
+    const description = document.getElementById('meeting-description').value.trim();
+    const attendee_ids = meetings.getSelectedAttendees();
+    if (!title || !date || !start_time || !end_time) {
+      alert('Please fill in title, date, start time, and end time.');
+      return;
+    }
+    try {
+      await api.createMeeting({ title, date, start_time, end_time, description: description || null, attendee_ids });
+      document.getElementById('meeting-title').value = '';
+      document.getElementById('meeting-description').value = '';
+      meetings.clearAttendeeSelection();
+      await loadMeetingsView();
+    } catch (err) { alert(err.message || 'Failed to schedule meeting.'); }
+  }
+
+  async function cancelMeeting(id) {
+    if (!confirm('Cancel this meeting?')) return;
+    try {
+      await api.deleteMeeting(id);
+      await loadMeetingsView();
+    } catch { alert('Failed to cancel meeting.'); }
+  }
+
   // ── Theme ─────────────────────────────────────────────────────────────────
 
   function initTheme() {
@@ -564,10 +619,12 @@ const app = (() => {
   });
 
   return {
-    addEntry, deleteEntry, approveEntry, rejectEntry,
+    addEntry, deleteEntry, approveEntry,
+    openRejectModal, closeRejectModal, confirmReject,
     openEdit, closeModal, saveEdit,
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
-    loadUsers, createUser, deleteUser, saveRate
+    loadUsers, createUser, deleteUser, saveRate,
+    scheduleMeeting, cancelMeeting
   };
 })();

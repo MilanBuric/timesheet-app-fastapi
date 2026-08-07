@@ -103,10 +103,37 @@ const api = (() => {
     return res.json();
   }
 
-  async function rejectEntry(id) {
-    const res = await request('POST', `/entries/${id}/reject`);
+  async function rejectEntry(id, reason = '') {
+    const res = await request('POST', `/entries/${id}/reject`, { reason: reason || null });
     if (!res.ok) throw new Error('Failed to reject entry');
     return res.json();
+  }
+
+  async function getBasicUsers() {
+    const res = await request('GET', '/users/basic');
+    if (!res.ok) throw new Error('Failed to fetch users');
+    return res.json();
+  }
+
+  async function getMeetings(params = {}) {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)));
+    const res = await request('GET', `/meetings?${qs}`);
+    if (!res.ok) throw new Error('Failed to fetch meetings');
+    return res.json();
+  }
+
+  async function createMeeting(data) {
+    const res = await request('POST', '/meetings', data);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to schedule meeting');
+    }
+    return res.json();
+  }
+
+  async function deleteMeeting(id) {
+    const res = await request('DELETE', `/meetings/${id}`);
+    if (!res.ok) throw new Error('Failed to cancel meeting');
   }
 
   async function getStats() {
@@ -147,6 +174,7 @@ const api = (() => {
     getUsers, createUser, deleteUser, setHourlyRate,
     getEntries, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
     getStats, getWeeklyReport,
-    clockIn, clockOut, getActiveSession
+    clockIn, clockOut, getActiveSession,
+    getBasicUsers, getMeetings, createMeeting, deleteMeeting
   };
 })();

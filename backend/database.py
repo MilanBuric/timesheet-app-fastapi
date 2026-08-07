@@ -34,6 +34,10 @@ def init_db():
                 created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
             )
         """)
+        # Migration: add rejection_reason to entries created before this column existed
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
+        if "rejection_reason" not in cols:
+            conn.execute("ALTER TABLE entries ADD COLUMN rejection_reason TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS clock_sessions (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +45,25 @@ def init_db():
                 clocked_in_at   TEXT    NOT NULL,
                 clocked_out_at  TEXT,
                 is_active       INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meetings (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                organizer_id   INTEGER NOT NULL REFERENCES users(id),
+                title          TEXT    NOT NULL,
+                description    TEXT,
+                date           TEXT    NOT NULL,
+                start_time     TEXT    NOT NULL,
+                end_time       TEXT    NOT NULL,
+                created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meeting_attendees (
+                meeting_id  INTEGER NOT NULL REFERENCES meetings(id),
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                PRIMARY KEY (meeting_id, user_id)
             )
         """)
         conn.commit()
