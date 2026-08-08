@@ -2,19 +2,33 @@
 Auto-generates real Google Meet links by creating a private Google Calendar
 event (on the organizer's own calendar) with a conference request attached.
 
-Setup required (one-time, per the walkthrough Claude gave you):
+Credentials are stored PER APP USER in the database (users.google_token),
+not in a single shared token.json — so each person using the Timesheet App
+authorizes their own Google account, and meetings they create use their own
+Calendar/Meet identity rather than whoever authorized first.
+
+Setup required (one-time per Google Cloud project, per app user):
     1. Google Cloud project with the Calendar API enabled
     2. OAuth 2.0 "Desktop app" credentials, downloaded as
-       backend/google_credentials.json
-    3. The very first time create_meet_link() runs, a browser window opens
-       asking you to log into Google and grant access. After that, a
-       token.json is saved locally so it won't ask again.
+       backend/google_credentials.json (shared across all app users — this
+       identifies the *app*, not the individual person)
+    3. The first time a given app user schedules an auto-generated Meet
+       link, a browser window opens asking THEM to log into Google and
+       grant access. After that, their credentials are saved in the
+       database against their account and reused automatically.
 
-Both google_credentials.json and token.json are gitignored — never commit
-them.
+Note on identity: the "login_hint" passed to Google only pre-fills/suggests
+an account on the sign-in screen — it does not force or verify which
+Google account someone actually authorizes with. Nothing stops a person
+from signing into a different Google account than their app email if they
+choose to on that screen.
+
+google_credentials.json is gitignored — never commit it. The old shared
+token.json from earlier versions of this app is no longer used; each app
+user just needs to authorize once under this new system.
 """
 import os
-import datetime
+import json
 import uuid
 from pathlib import Path
 
@@ -26,7 +40,6 @@ except ImportError:
 
 BACKEND_DIR = Path(__file__).parent
 CREDENTIALS_PATH = BACKEND_DIR / "google_credentials.json"
-TOKEN_PATH = BACKEND_DIR / "token.json"
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 TIMEZONE = os.environ.get("GOOGLE_CALENDAR_TIMEZONE", "Europe/Belgrade")
 
@@ -36,10 +49,26 @@ class GoogleMeetError(Exception):
     pass
 
 
-def _get_credentials():
-    from google.auth.transport.requests import Request
+def _load_credentials(conn, user_id: int):
     from google.oauth2.credentials import Credentials
+    row = conn.execute("SELECT google_token FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row and row["google_token"]:
+        try:
+            return Credentials.from_authorized_user_info(json.loads(row["google_token"]), SCOPES)
+        except (ValueError, json.JSONDecodeError):
+            return None  # corrupted/old-format token; treat as absent
+    return None
+
+
+def _save_credentials(conn, user_id: int, creds) -> None:
+    conn.execute("UPDATE users SET google_token = ? WHERE id = ?", (creds.to_json(), user_id))
+    conn.commit()
+
+
+def _get_credentials(user_id: int, login_hint: str = None):
+    from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
+    from database import get_connection
 
     if not CREDENTIALS_PATH.exists():
         raise GoogleMeetError(
@@ -47,28 +76,42 @@ def _get_credentials():
             "Follow the Google Cloud setup steps to download it first."
         )
 
-    creds = None
-    if TOKEN_PATH.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+    with get_connection() as conn:
+        creds = _load_credentials(conn, user_id)
 
-    if not creds or not creds.valid:
+        if creds and creds.valid:
+            return creds
+
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
-        else:
-            # First-time use: this opens a browser window for you to log in
-            # and grant access. Only happens once per machine.
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
-            creds = flow.run_local_server(port=0)
-        TOKEN_PATH.write_text(creds.to_json())
+            _save_credentials(conn, user_id, creds)
+            return creds
 
-    return creds
+        # No usable credentials for this app user yet: this opens a browser
+        # window for THEM to log in and grant access. login_hint just
+        # pre-fills the suggested account on Google's screen.
+        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
+        kwargs = {"login_hint": login_hint} if login_hint else {}
+        creds = flow.run_local_server(port=0, **kwargs)
+        _save_credentials(conn, user_id, creds)
+        return creds
 
 
-def create_meet_link(title: str, description: str, date: str, start_time: str, end_time: str) -> str:
+def create_meet_link(title: str, description: str, date: str, start_time: str, end_time: str,
+                      user_id: int, login_hint: str = None, attendee_emails: list = None) -> str:
     """
     Creates a private Google Calendar event on the organizer's own calendar
-    (no attendees added — the Timesheet App sends its own invite emails
-    separately) purely to obtain a real meet.google.com link.
+    purely to obtain a real meet.google.com link. attendee_emails are added
+    as real guests on the event (not just our own separate invite email) so
+    Google Meet can recognize and auto-admit them instead of putting them
+    in the "waiting for the host" screen — this only works for guests who
+    join while signed into the Google account matching their invited
+    email; anonymous or differently-signed-in joins will still need to be
+    manually admitted by the organizer, since Meet can't verify identity
+    any other way.
+
+    user_id ties the Google credentials to a specific app user, so each
+    person authorizes and uses their own Google account.
 
     Raises GoogleMeetError with a human-readable message on any failure.
     """
@@ -81,7 +124,7 @@ def create_meet_link(title: str, description: str, date: str, start_time: str, e
         )
 
     try:
-        creds = _get_credentials()
+        creds = _get_credentials(user_id, login_hint)
         service = build("calendar", "v3", credentials=creds)
 
         start_dt = f"{date}T{start_time}:00"
@@ -99,6 +142,9 @@ def create_meet_link(title: str, description: str, date: str, start_time: str, e
                 }
             }
         }
+        if attendee_emails:
+            event["attendees"] = [{"email": e} for e in attendee_emails]
+            event["guestsCanSeeOtherGuests"] = True
 
         created = service.events().insert(
             calendarId="primary",

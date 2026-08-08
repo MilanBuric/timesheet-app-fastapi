@@ -566,6 +566,18 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
     room = body.room.strip() if body.room else None
     meeting_link = body.meeting_link.strip() if body.meeting_link else None
 
+    # Look up attendee emails early so a Google Meet link (if requested) can
+    # include them as real guests on the Calendar event — otherwise Google
+    # Meet has no way to auto-admit them and everyone lands in the
+    # "waiting for the host" screen.
+    with get_connection() as conn:
+        invited_users = []
+        for uid in set(body.attendee_ids) - {current_user["id"]}:
+            u = conn.execute("SELECT id, username, email FROM users WHERE id = ?", (uid,)).fetchone()
+            if u:
+                invited_users.append(dict(u))
+    attendee_emails = [u["email"] for u in invited_users if u.get("email")]
+
     if body.location_type == "in_person":
         if not room:
             raise HTTPException(status_code=400, detail="Room is required for in-person meetings")
@@ -576,7 +588,9 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
             try:
                 meeting_link = google_meet.create_meet_link(
                     title=body.title, description=body.description,
-                    date=body.date, start_time=body.start_time, end_time=body.end_time
+                    date=body.date, start_time=body.start_time, end_time=body.end_time,
+                    user_id=current_user["id"], login_hint=current_user.get("email"),
+                    attendee_emails=attendee_emails
                 )
             except google_meet.GoogleMeetError as exc:
                 raise HTTPException(status_code=502, detail=str(exc))
@@ -632,6 +646,25 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
                 )
             except Exception as exc:
                 print(f"❌ Failed to email {invitee['email']}: {exc}")
+
+    if current_user.get("email"):
+        try:
+            email_utils.send_organizer_confirmation(
+                to_email=current_user["email"],
+                organizer_name=current_user["username"],
+                title=body.title,
+                date=body.date,
+                start_time=body.start_time,
+                end_time=body.end_time,
+                description=body.description,
+                location_type=body.location_type,
+                room=room,
+                meeting_link=meeting_link,
+                guests=all_guest_names
+            )
+        except Exception as exc:
+            print(f"❌ Failed to email organizer {current_user['email']}: {exc}")
+
     return result
 
 

@@ -1,5 +1,9 @@
 """
-Sends meeting-invite emails with one-click Accept / Decline links.
+Sends meeting-related emails: invites (with one-click Accept/Decline links)
+to attendees, and a confirmation email to the organizer with a direct join
+link — useful because the organizer is the one whose Google account has
+"host" powers in Meet (able to admit waiting guests), so they need fast
+access to the link themselves, not just inside the app.
 
 Configuration is read from environment variables (see .env.example):
     SMTP_HOST        default: smtp.gmail.com
@@ -34,13 +38,10 @@ SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "Timesheet App")
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 
 
-def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
-                         title: str, date: str, start_time: str, end_time: str,
-                         description: str, rsvp_token: str,
-                         location_type: str = "online", room: str = None,
-                         meeting_link: str = None, guests: list = None) -> None:
-    accept_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=accept"
-    decline_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=decline"
+def _build_card_html(title: str, date: str, start_time: str, end_time: str,
+                      description: str, location_type: str, room: str,
+                      meeting_link: str, organizer_name: str, guests: list) -> tuple:
+    """Returns (card_html, location_text, guest_lines) shared by both email types."""
     guests = guests or []
 
     if location_type == "in_person":
@@ -76,10 +77,7 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
         </td></tr>
     """ if location_label else ""
 
-    html = f"""
-    <!DOCTYPE html>
-    <html><head><meta charset="utf-8"></head><body>
-    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+    card_html = f"""
       <div style="background:#f1f3f4;border-radius:10px;padding:20px 24px;">
         <div style="font-size:12px;color:#5f6368;letter-spacing:.3px;">
           {date} &nbsp;·&nbsp; {start_time} – {end_time}
@@ -95,7 +93,54 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
           {guests_html}
         </div>
       </div>
+    """
+    guest_lines = "\n".join(
+        f"- {g}" + (" (organizer)" if g == organizer_name else "") for g in ([organizer_name] + guests)
+    )
+    return card_html, location_text, guest_lines
 
+
+def _send(to_email: str, subject: str, html: str, text: str) -> None:
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_USERNAME}>" if SMTP_USERNAME else SMTP_FROM_NAME
+    msg["To"] = to_email
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        print(f"⚠️  SMTP not configured — printing email instead of sending to {to_email}:\n{text}")
+        return
+
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context) as server:
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
+        print(f"✅ Email sent to {to_email}")
+    except Exception as exc:
+        # Never let an email failure break meeting creation
+        print(f"❌ Failed to send email to {to_email}: {exc}")
+
+
+def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
+                         title: str, date: str, start_time: str, end_time: str,
+                         description: str, rsvp_token: str,
+                         location_type: str = "online", room: str = None,
+                         meeting_link: str = None, guests: list = None) -> None:
+    accept_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=accept"
+    decline_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=decline"
+
+    card_html, location_text, guest_lines = _build_card_html(
+        title, date, start_time, end_time, description, location_type, room,
+        meeting_link, organizer_name, guests
+    )
+
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+      {card_html}
       <p style="font-size:14px;color:#3c4043;margin:18px 0 10px;">
         Hi {attendee_name}, you've been invited to this meeting. Please respond:
       </p>
@@ -115,7 +160,6 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
     </div>
     </body></html>
     """
-    guest_lines = "\n".join(f"- {g}" + (" (organizer)" if g == organizer_name else "") for g in ([organizer_name] + guests))
     text = (
         f"{title}\n"
         f"When: {date}, {start_time} - {end_time}\n"
@@ -124,24 +168,42 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
         f"Guests:\n{guest_lines}\n\n"
         f"Accept: {accept_url}\nDecline: {decline_url}\n"
     )
+    _send(to_email, f"Meeting invite: {title}", html, text)
 
-    msg = EmailMessage()
-    msg["Subject"] = f"Meeting invite: {title}"
-    msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_USERNAME}>" if SMTP_USERNAME else SMTP_FROM_NAME
-    msg["To"] = to_email
-    msg.set_content(text)
-    msg.add_alternative(html, subtype="html")
 
-    if not SMTP_USERNAME or not SMTP_PASSWORD:
-        print(f"⚠️  SMTP not configured — printing email instead of sending to {to_email}:\n{text}")
-        return
+def send_organizer_confirmation(to_email: str, organizer_name: str,
+                                 title: str, date: str, start_time: str, end_time: str,
+                                 description: str, location_type: str = "online",
+                                 room: str = None, meeting_link: str = None,
+                                 guests: list = None) -> None:
+    """
+    Sent to the organizer themselves after scheduling — no Accept/Decline
+    needed since it's their own meeting. Gives them a fast, direct join
+    link by email, which matters because their Google account is the one
+    with "host" powers to admit waiting guests in Meet.
+    """
+    card_html, location_text, guest_lines = _build_card_html(
+        title, date, start_time, end_time, description, location_type, room,
+        meeting_link, organizer_name, guests
+    )
 
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context) as server:
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(msg)
-        print(f"✅ Meeting invite emailed to {to_email}")
-    except Exception as exc:
-        # Never let an email failure break meeting creation
-        print(f"❌ Failed to send meeting invite to {to_email}: {exc}")
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+      {card_html}
+      <p style="font-size:14px;color:#3c4043;margin:18px 0 10px;">
+        You're the organizer — this is your copy for quick access. If Meet puts guests in a
+        waiting room, join from here so you can admit them.
+      </p>
+    </div>
+    </body></html>
+    """
+    text = (
+        f"{title} (you're the organizer)\n"
+        f"When: {date}, {start_time} - {end_time}\n"
+        f"{location_text}\n\n"
+        f"{description or ''}\n\n"
+        f"Guests:\n{guest_lines}\n"
+    )
+    _send(to_email, f"Your meeting: {title}", html, text)

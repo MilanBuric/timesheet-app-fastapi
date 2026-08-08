@@ -26,6 +26,10 @@ def init_db():
         user_cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
         if "email" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        # Migration: add google_token so each app user has their own Google OAuth
+        # credentials for auto-generated Meet links, instead of one shared token
+        if "google_token" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN google_token TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS entries (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
