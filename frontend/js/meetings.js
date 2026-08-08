@@ -41,6 +41,16 @@ const meetings = (() => {
     return map[status] || '';
   }
 
+  function locationInfo(m) {
+    if (m.location_type === 'in_person') {
+      return `<div class="meeting-room-tag">📍 ${m.room}</div>`;
+    }
+    if (m.meeting_link) {
+      return `<a href="${m.meeting_link}" target="_blank" rel="noopener" class="meeting-join-link">💻 Join meeting</a>`;
+    }
+    return `<div class="meeting-location-info">💻 Online</div>`;
+  }
+
   function renderList(list, currentUser) {
     const container = document.getElementById('meetings-container');
     if (!list.length) {
@@ -63,6 +73,7 @@ const meetings = (() => {
           <h3 class="meeting-title">${m.title}</h3>
           ${m.description ? `<p class="meeting-desc">${m.description}</p>` : ''}
           <p class="meeting-organizer">Organized by ${m.organizer_username}</p>
+          ${locationInfo(m)}
           ${m.attendees.length ? `<div class="meeting-attendees">${m.attendees.map(a =>
             `<span class="attendee-tag">${a.username} ${statusBadge(a.status)}</span>`
           ).join('')}</div>` : ''}

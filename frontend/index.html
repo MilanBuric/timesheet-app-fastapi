@@ -246,6 +246,27 @@
               <input type="time" id="meeting-end" />
             </div>
             <div class="form-group" style="grid-column:1/-1;">
+              <label>Location</label>
+              <div class="location-toggle">
+                <label class="location-option">
+                  <input type="radio" name="meeting-location-type" value="online" checked onchange="app.toggleMeetingLocation()" />
+                  <span>💻 Online</span>
+                </label>
+                <label class="location-option">
+                  <input type="radio" name="meeting-location-type" value="in_person" onchange="app.toggleMeetingLocation()" />
+                  <span>📍 In person</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group" id="meeting-link-group" style="grid-column:1/-1;">
+              <label for="meeting-link">Meeting link (optional)</label>
+              <input type="url" id="meeting-link" placeholder="e.g. https://meet.google.com/..." />
+            </div>
+            <div class="form-group hidden" id="meeting-room-group" style="grid-column:1/-1;">
+              <label for="meeting-room">Room</label>
+              <input type="text" id="meeting-room" placeholder="e.g. Conference Room B" />
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
               <label for="meeting-description">Description</label>
               <input type="text" id="meeting-description" placeholder="Optional details" />
             </div>

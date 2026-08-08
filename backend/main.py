@@ -546,15 +546,45 @@ def get_meetings(date_from: str = None, date_to: str = None, current_user=Depend
         return [_meeting_with_attendees(conn, mid) for mid in ids]
 
 
+def _rooms_overlap(conn, date: str, start_time: str, end_time: str, room: str, exclude_meeting_id: int = None) -> bool:
+    query = """SELECT id FROM meetings
+               WHERE date = ? AND location_type = 'in_person' AND room = ?
+                 AND NOT (end_time <= ? OR start_time >= ?)"""
+    params = [date, room, start_time, end_time]
+    if exclude_meeting_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_meeting_id)
+    return conn.execute(query, params).fetchone() is not None
+
+
 @app.post("/meetings", response_model=MeetingResponse, status_code=201)
 def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
     if body.end_time <= body.start_time:
         raise HTTPException(status_code=400, detail="End time must be after start time")
+
+    room = body.room.strip() if body.room else None
+    meeting_link = body.meeting_link.strip() if body.meeting_link else None
+
+    if body.location_type == "in_person":
+        if not room:
+            raise HTTPException(status_code=400, detail="Room is required for in-person meetings")
+        meeting_link = None
+    else:
+        room = None
+
     with get_connection() as conn:
+        if body.location_type == "in_person" and _rooms_overlap(conn, body.date, body.start_time, body.end_time, room):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Room \"{room}\" is already booked for an overlapping time on {body.date}"
+            )
+
         cursor = conn.execute(
-            """INSERT INTO meetings (organizer_id, title, description, date, start_time, end_time)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (current_user["id"], body.title, body.description, body.date, body.start_time, body.end_time)
+            """INSERT INTO meetings (organizer_id, title, description, date, start_time, end_time,
+                                      location_type, room, meeting_link)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (current_user["id"], body.title, body.description, body.date, body.start_time, body.end_time,
+             body.location_type, room, meeting_link)
         )
         meeting_id = cursor.lastrowid
         invitees = []
@@ -584,7 +614,10 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
                     start_time=body.start_time,
                     end_time=body.end_time,
                     description=body.description,
-                    rsvp_token=invitee["rsvp_token"]
+                    rsvp_token=invitee["rsvp_token"],
+                    location_type=body.location_type,
+                    room=room,
+                    meeting_link=meeting_link
                 )
             except Exception as exc:
                 print(f"❌ Failed to email {invitee['email']}: {exc}")

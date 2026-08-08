@@ -591,21 +591,41 @@ const app = (() => {
     } catch { alert('Failed to respond to meeting.'); }
   }
 
+  function toggleMeetingLocation() {
+    const isInPerson = document.querySelector('input[name="meeting-location-type"]:checked').value === 'in_person';
+    document.getElementById('meeting-room-group').classList.toggle('hidden', !isInPerson);
+    document.getElementById('meeting-link-group').classList.toggle('hidden', isInPerson);
+  }
+
   async function scheduleMeeting() {
     const title = document.getElementById('meeting-title').value.trim();
     const date = document.getElementById('meeting-date').value;
     const start_time = document.getElementById('meeting-start').value;
     const end_time = document.getElementById('meeting-end').value;
     const description = document.getElementById('meeting-description').value.trim();
+    const location_type = document.querySelector('input[name="meeting-location-type"]:checked').value;
+    const room = document.getElementById('meeting-room').value.trim();
+    const meeting_link = document.getElementById('meeting-link').value.trim();
     const attendee_ids = meetings.getSelectedAttendees();
     if (!title || !date || !start_time || !end_time) {
       alert('Please fill in title, date, start time, and end time.');
       return;
     }
+    if (location_type === 'in_person' && !room) {
+      alert('Please specify a room for an in-person meeting.');
+      return;
+    }
     try {
-      await api.createMeeting({ title, date, start_time, end_time, description: description || null, attendee_ids });
+      await api.createMeeting({
+        title, date, start_time, end_time, description: description || null, attendee_ids,
+        location_type,
+        room: location_type === 'in_person' ? room : null,
+        meeting_link: location_type === 'online' ? (meeting_link || null) : null
+      });
       document.getElementById('meeting-title').value = '';
       document.getElementById('meeting-description').value = '';
+      document.getElementById('meeting-room').value = '';
+      document.getElementById('meeting-link').value = '';
       meetings.clearAttendeeSelection();
       await loadMeetingsView();
     } catch (err) { alert(err.message || 'Failed to schedule meeting.'); }
@@ -651,6 +671,6 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail
+    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail, toggleMeetingLocation
   };
 })();

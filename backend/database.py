@@ -60,9 +60,20 @@ def init_db():
                 date           TEXT    NOT NULL,
                 start_time     TEXT    NOT NULL,
                 end_time       TEXT    NOT NULL,
+                location_type  TEXT    NOT NULL DEFAULT 'online',
+                room           TEXT,
+                meeting_link   TEXT,
                 created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
             )
         """)
+        # Migration: add location_type/room/meeting_link to meetings created before these columns existed
+        meeting_cols = [r["name"] for r in conn.execute("PRAGMA table_info(meetings)").fetchall()]
+        if "location_type" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN location_type TEXT NOT NULL DEFAULT 'online'")
+        if "room" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN room TEXT")
+        if "meeting_link" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN meeting_link TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS meeting_attendees (
                 meeting_id  INTEGER NOT NULL REFERENCES meetings(id),

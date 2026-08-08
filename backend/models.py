@@ -134,6 +134,9 @@ class MeetingCreate(BaseModel):
     date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     start_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
     end_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    location_type: str = Field("online", pattern="^(online|in_person)$")
+    room: Optional[str] = Field(None, max_length=100)
+    meeting_link: Optional[str] = Field(None, max_length=500)
     attendee_ids: list[int] = []
 
 
@@ -146,5 +149,8 @@ class MeetingResponse(BaseModel):
     date: str
     start_time: str
     end_time: str
+    location_type: str = "online"
+    room: Optional[str] = None
+    meeting_link: Optional[str] = None
     attendees: list[AttendeeInfo] = []
     created_at: str
