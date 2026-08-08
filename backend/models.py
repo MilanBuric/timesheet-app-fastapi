@@ -137,6 +137,7 @@ class MeetingCreate(BaseModel):
     location_type: str = Field("online", pattern="^(online|in_person)$")
     room: Optional[str] = Field(None, max_length=100)
     meeting_link: Optional[str] = Field(None, max_length=500)
+    use_google_meet: bool = False
     attendee_ids: list[int] = []
 
 

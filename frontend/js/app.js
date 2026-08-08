@@ -597,6 +597,13 @@ const app = (() => {
     document.getElementById('meeting-link-group').classList.toggle('hidden', isInPerson);
   }
 
+  function toggleGoogleMeetOption() {
+    const useGoogleMeet = document.getElementById('meeting-use-google-meet').checked;
+    document.getElementById('meeting-link').classList.toggle('hidden', useGoogleMeet);
+    document.getElementById('meeting-link-label').classList.toggle('hidden', useGoogleMeet);
+    if (useGoogleMeet) document.getElementById('meeting-link').value = '';
+  }
+
   async function scheduleMeeting() {
     const title = document.getElementById('meeting-title').value.trim();
     const date = document.getElementById('meeting-date').value;
@@ -606,6 +613,7 @@ const app = (() => {
     const location_type = document.querySelector('input[name="meeting-location-type"]:checked').value;
     const room = document.getElementById('meeting-room').value.trim();
     const meeting_link = document.getElementById('meeting-link').value.trim();
+    const use_google_meet = document.getElementById('meeting-use-google-meet').checked;
     const attendee_ids = meetings.getSelectedAttendees();
     if (!title || !date || !start_time || !end_time) {
       alert('Please fill in title, date, start time, and end time.');
@@ -620,12 +628,15 @@ const app = (() => {
         title, date, start_time, end_time, description: description || null, attendee_ids,
         location_type,
         room: location_type === 'in_person' ? room : null,
-        meeting_link: location_type === 'online' ? (meeting_link || null) : null
+        meeting_link: location_type === 'online' ? (meeting_link || null) : null,
+        use_google_meet: location_type === 'online' ? use_google_meet : false
       });
       document.getElementById('meeting-title').value = '';
       document.getElementById('meeting-description').value = '';
       document.getElementById('meeting-room').value = '';
       document.getElementById('meeting-link').value = '';
+      document.getElementById('meeting-use-google-meet').checked = false;
+      toggleGoogleMeetOption();
       meetings.clearAttendeeSelection();
       await loadMeetingsView();
     } catch (err) { alert(err.message || 'Failed to schedule meeting.'); }
@@ -671,6 +682,6 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail, toggleMeetingLocation
+    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail, toggleMeetingLocation, toggleGoogleMeetOption
   };
 })();

@@ -13,6 +13,7 @@ from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     RSVPRequest)
 from auth import verify_password, create_token, get_current_user, require_manager
 import email_utils
+import google_meet
 
 app = FastAPI(title="Timesheet API")
 
@@ -571,6 +572,14 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
         meeting_link = None
     else:
         room = None
+        if body.use_google_meet:
+            try:
+                meeting_link = google_meet.create_meet_link(
+                    title=body.title, description=body.description,
+                    date=body.date, start_time=body.start_time, end_time=body.end_time
+                )
+            except google_meet.GoogleMeetError as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
 
     with get_connection() as conn:
         if body.location_type == "in_person" and _rooms_overlap(conn, body.date, body.start_time, body.end_time, room):
@@ -602,6 +611,7 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
 
     # Send invite emails after the transaction commits; never let a failed
     # email prevent the meeting itself from being created.
+    all_guest_names = [inv["username"] for inv in invitees]
     for invitee in invitees:
         if invitee.get("email"):
             try:
@@ -617,7 +627,8 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
                     rsvp_token=invitee["rsvp_token"],
                     location_type=body.location_type,
                     room=room,
-                    meeting_link=meeting_link
+                    meeting_link=meeting_link,
+                    guests=all_guest_names
                 )
             except Exception as exc:
                 print(f"❌ Failed to email {invitee['email']}: {exc}")

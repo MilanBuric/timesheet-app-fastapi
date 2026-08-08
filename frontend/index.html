@@ -259,7 +259,11 @@
               </div>
             </div>
             <div class="form-group" id="meeting-link-group" style="grid-column:1/-1;">
-              <label for="meeting-link">Meeting link (optional)</label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="meeting-use-google-meet" onchange="app.toggleGoogleMeetOption()" />
+                <span>🎥 Auto-generate a Google Meet link</span>
+              </label>
+              <label for="meeting-link" id="meeting-link-label">Meeting link (optional)</label>
               <input type="url" id="meeting-link" placeholder="e.g. https://meet.google.com/..." />
             </div>
             <div class="form-group hidden" id="meeting-room-group" style="grid-column:1/-1;">

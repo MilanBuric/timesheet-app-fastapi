@@ -38,40 +38,62 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
                          title: str, date: str, start_time: str, end_time: str,
                          description: str, rsvp_token: str,
                          location_type: str = "online", room: str = None,
-                         meeting_link: str = None) -> None:
+                         meeting_link: str = None, guests: list = None) -> None:
     accept_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=accept"
     decline_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=decline"
+    guests = guests or []
 
     if location_type == "in_person":
-        location_html = f"""
-        <tr><td style="padding-top:14px;">
-          <span style="color:#5f6368;font-size:13px;">📍 Room</span><br>
-          <span style="font-size:14px;color:#202124;">{room}</span>
-        </td></tr>"""
+        location_label = "📍 Where"
+        location_value_html = room
         location_text = f"Room: {room}"
     elif meeting_link:
-        location_html = f"""
-        <tr><td style="padding-top:16px;">
-          <a href="{meeting_link}" style="background:#1a73e8;color:#fff;padding:10px 22px;
-             border-radius:6px;text-decoration:none;display:inline-block;font-size:14px;
-             font-weight:500;">Join meeting</a>
-          <div style="margin-top:8px;font-size:12px;color:#5f6368;word-break:break-all;">{meeting_link}</div>
-        </td></tr>"""
+        location_label = None
+        location_value_html = None
         location_text = f"Join: {meeting_link}"
     else:
-        location_html = ""
+        location_label = "💻 Where"
+        location_value_html = "Online (link to be shared)"
         location_text = "Online (link to be shared)"
 
+    guests_html = "".join(
+        f'<div style="font-size:13px;color:#3c4043;padding:2px 0;">'
+        f'{"👤 " if g == organizer_name else ""}{g}{" — organizer" if g == organizer_name else ""}</div>'
+        for g in ([organizer_name] + guests)
+    )
+
+    join_button_html = f"""
+      <a href="{meeting_link}" style="background:#1a73e8;color:#fff;padding:10px 22px;
+         border-radius:6px;text-decoration:none;display:inline-block;font-size:14px;
+         font-weight:500;">Join meeting</a>
+      <div style="margin-top:8px;font-size:12px;color:#5f6368;word-break:break-all;">{meeting_link}</div>
+    """ if (location_type == "online" and meeting_link) else ""
+
+    where_row_html = f"""
+        <tr><td style="padding-top:14px;">
+          <div style="font-size:12px;color:#5f6368;">{location_label}</div>
+          <div style="font-size:14px;color:#202124;">{location_value_html}</div>
+        </td></tr>
+    """ if location_label else ""
+
     html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
     <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
       <div style="background:#f1f3f4;border-radius:10px;padding:20px 24px;">
         <div style="font-size:12px;color:#5f6368;letter-spacing:.3px;">
           {date} &nbsp;·&nbsp; {start_time} – {end_time}
         </div>
         <div style="font-size:19px;color:#202124;font-weight:500;margin-top:4px;">{title}</div>
-        <div style="font-size:13px;color:#5f6368;margin-top:2px;">Organized by {organizer_name}</div>
         {f'<div style="font-size:13px;color:#3c4043;margin-top:10px;">{description}</div>' if description else ''}
-        <table cellpadding="0" cellspacing="0" style="margin-top:4px;">{location_html}</table>
+
+        <table cellpadding="0" cellspacing="0" style="margin-top:4px;">{where_row_html}</table>
+        {f'<div style="margin-top:14px;">{join_button_html}</div>' if join_button_html else ''}
+
+        <div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0;">
+          <div style="font-size:12px;color:#5f6368;margin-bottom:6px;">Guests</div>
+          {guests_html}
+        </div>
       </div>
 
       <p style="font-size:14px;color:#3c4043;margin:18px 0 10px;">
@@ -91,12 +113,15 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
         You can also respond from inside the Timesheet App.
       </p>
     </div>
+    </body></html>
     """
+    guest_lines = "\n".join(f"- {g}" + (" (organizer)" if g == organizer_name else "") for g in ([organizer_name] + guests))
     text = (
-        f"{title}\nOrganized by {organizer_name}\n"
+        f"{title}\n"
         f"When: {date}, {start_time} - {end_time}\n"
         f"{location_text}\n\n"
         f"{description or ''}\n\n"
+        f"Guests:\n{guest_lines}\n\n"
         f"Accept: {accept_url}\nDecline: {decline_url}\n"
     )
 
