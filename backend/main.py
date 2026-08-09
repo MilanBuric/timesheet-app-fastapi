@@ -587,10 +587,7 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
         if body.use_google_meet:
             try:
                 meeting_link = google_meet.create_meet_link(
-                    title=body.title, description=body.description,
-                    date=body.date, start_time=body.start_time, end_time=body.end_time,
-                    user_id=current_user["id"], login_hint=current_user.get("email"),
-                    attendee_emails=attendee_emails
+                    user_id=current_user["id"], login_hint=current_user.get("email")
                 )
             except google_meet.GoogleMeetError as exc:
                 raise HTTPException(status_code=502, detail=str(exc))

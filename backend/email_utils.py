@@ -5,6 +5,12 @@ link — useful because the organizer is the one whose Google account has
 "host" powers in Meet (able to admit waiting guests), so they need fast
 access to the link themselves, not just inside the app.
 
+The layout deliberately mirrors Google Calendar's own invite email (When /
+Guests on the left, a solid "Join with Google Meet" button + plain-text
+link on the right, outlined pill-style reply buttons) so it reads as a
+familiar, legitimate meeting invite rather than something that looks
+unfamiliar or spam-like.
+
 Configuration is read from environment variables (see .env.example):
     SMTP_HOST        default: smtp.gmail.com
     SMTP_PORT        default: 465
@@ -45,59 +51,63 @@ def _build_card_html(title: str, date: str, start_time: str, end_time: str,
     guests = guests or []
 
     if location_type == "in_person":
-        location_label = "📍 Where"
-        location_value_html = room
-        location_text = f"Room: {room}"
+        where_label, where_value, location_text = "Where", room, f"Room: {room}"
     elif meeting_link:
-        location_label = None
-        location_value_html = None
-        location_text = f"Join: {meeting_link}"
+        where_label, where_value, location_text = None, None, f"Join: {meeting_link}"
     else:
-        location_label = "💻 Where"
-        location_value_html = "Online (link to be shared)"
+        where_label, where_value = "Where", "Online (link to be shared)"
         location_text = "Online (link to be shared)"
 
     guests_html = "".join(
         f'<div style="font-size:13px;color:#3c4043;padding:2px 0;">'
-        f'{"👤 " if g == organizer_name else ""}{g}{" — organizer" if g == organizer_name else ""}</div>'
+        f'{g}{" <span style=\'color:#5f6368;\'>- organizer</span>" if g == organizer_name else ""}</div>'
         for g in ([organizer_name] + guests)
     )
 
-    join_button_html = f"""
-      <a href="{meeting_link}" style="background:#1a73e8;color:#fff;padding:10px 22px;
-         border-radius:6px;text-decoration:none;display:inline-block;font-size:14px;
-         font-weight:500;">Join meeting</a>
-      <div style="margin-top:8px;font-size:12px;color:#5f6368;word-break:break-all;">{meeting_link}</div>
-    """ if (location_type == "online" and meeting_link) else ""
+    left_column_html = f"""
+      <div style="font-size:12px;color:#5f6368;letter-spacing:.3px;">
+        {date} &nbsp;·&nbsp; {start_time} – {end_time}
+      </div>
+      <div style="font-size:19px;color:#202124;font-weight:500;margin-top:4px;">{title}</div>
+      {f'<div style="font-size:13px;color:#3c4043;margin-top:10px;">{description}</div>' if description else ''}
+      {f'''<div style="margin-top:14px;">
+        <div style="font-size:12px;color:#5f6368;">{where_label}</div>
+        <div style="font-size:14px;color:#202124;">{where_value}</div>
+      </div>''' if where_label else ''}
+      <div style="margin-top:18px;">
+        <div style="font-size:12px;color:#5f6368;margin-bottom:6px;">Guests</div>
+        {guests_html}
+      </div>
+    """
 
-    where_row_html = f"""
-        <tr><td style="padding-top:14px;">
-          <div style="font-size:12px;color:#5f6368;">{location_label}</div>
-          <div style="font-size:14px;color:#202124;">{location_value_html}</div>
-        </td></tr>
-    """ if location_label else ""
+    right_column_html = f"""
+      <a href="{meeting_link}" style="background:#1a73e8;color:#fff;padding:10px 22px;
+         border-radius:4px;text-decoration:none;display:inline-block;font-size:14px;
+         font-weight:500;white-space:nowrap;">Join with Google Meet</a>
+      <div style="margin-top:14px;font-size:12px;color:#5f6368;">Meeting link</div>
+      <div style="font-size:13px;color:#202124;word-break:break-all;">{meeting_link}</div>
+    """ if (location_type == "online" and meeting_link) else ""
 
     card_html = f"""
       <div style="background:#f1f3f4;border-radius:10px;padding:20px 24px;">
-        <div style="font-size:12px;color:#5f6368;letter-spacing:.3px;">
-          {date} &nbsp;·&nbsp; {start_time} – {end_time}
-        </div>
-        <div style="font-size:19px;color:#202124;font-weight:500;margin-top:4px;">{title}</div>
-        {f'<div style="font-size:13px;color:#3c4043;margin-top:10px;">{description}</div>' if description else ''}
-
-        <table cellpadding="0" cellspacing="0" style="margin-top:4px;">{where_row_html}</table>
-        {f'<div style="margin-top:14px;">{join_button_html}</div>' if join_button_html else ''}
-
-        <div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0;">
-          <div style="font-size:12px;color:#5f6368;margin-bottom:6px;">Guests</div>
-          {guests_html}
-        </div>
+        <table cellpadding="0" cellspacing="0" width="100%"><tr>
+          <td valign="top" style="padding-right:20px;">{left_column_html}</td>
+          {f'<td valign="top" width="200" style="border-left:1px solid #dadce0;padding-left:20px;">{right_column_html}</td>' if right_column_html else ''}
+        </tr></table>
       </div>
     """
     guest_lines = "\n".join(
         f"- {g}" + (" (organizer)" if g == organizer_name else "") for g in ([organizer_name] + guests)
     )
     return card_html, location_text, guest_lines
+
+
+def _pill_button(label: str, href: str, color: str) -> str:
+    return f"""
+      <a href="{href}" style="border:1px solid {color};color:{color};background:#fff;
+         padding:8px 22px;border-radius:20px;text-decoration:none;display:inline-block;
+         font-size:13px;font-weight:500;">{label}</a>
+    """
 
 
 def _send(to_email: str, subject: str, html: str, text: str) -> None:
@@ -139,20 +149,14 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
     html = f"""
     <!DOCTYPE html>
     <html><head><meta charset="utf-8"></head><body>
-    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
       {card_html}
-      <p style="font-size:14px;color:#3c4043;margin:18px 0 10px;">
-        Hi {attendee_name}, you've been invited to this meeting. Please respond:
+      <p style="font-size:13px;color:#5f6368;margin:16px 0 8px;">
+        Reply for {to_email}
       </p>
       <table cellpadding="0" cellspacing="0"><tr>
-        <td style="padding-right: 10px;">
-          <a href="{accept_url}" style="background:#16a34a;color:#fff;padding:10px 20px;
-             border-radius:20px;text-decoration:none;display:inline-block;font-size:14px;">Accept</a>
-        </td>
-        <td>
-          <a href="{decline_url}" style="background:#dc2626;color:#fff;padding:10px 20px;
-             border-radius:20px;text-decoration:none;display:inline-block;font-size:14px;">Decline</a>
-        </td>
+        <td style="padding-right: 8px;">{_pill_button("Yes", accept_url, "#1a73e8")}</td>
+        <td>{_pill_button("No", decline_url, "#5f6368")}</td>
       </tr></table>
       <p style="color:#999;font-size:12px;margin-top:20px;">
         You can also respond from inside the Timesheet App.
@@ -166,9 +170,10 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
         f"{location_text}\n\n"
         f"{description or ''}\n\n"
         f"Guests:\n{guest_lines}\n\n"
-        f"Accept: {accept_url}\nDecline: {decline_url}\n"
+        f"Reply for {to_email}\n"
+        f"Yes: {accept_url}\nNo: {decline_url}\n"
     )
-    _send(to_email, f"Meeting invite: {title}", html, text)
+    _send(to_email, f"Invitation: {title} @ {date} {start_time} – {end_time}", html, text)
 
 
 def send_organizer_confirmation(to_email: str, organizer_name: str,
@@ -190,9 +195,9 @@ def send_organizer_confirmation(to_email: str, organizer_name: str,
     html = f"""
     <!DOCTYPE html>
     <html><head><meta charset="utf-8"></head><body>
-    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
       {card_html}
-      <p style="font-size:14px;color:#3c4043;margin:18px 0 10px;">
+      <p style="font-size:13px;color:#5f6368;margin:16px 0 0;">
         You're the organizer — this is your copy for quick access. If Meet puts guests in a
         waiting room, join from here so you can admit them.
       </p>
@@ -206,4 +211,4 @@ def send_organizer_confirmation(to_email: str, organizer_name: str,
         f"{description or ''}\n\n"
         f"Guests:\n{guest_lines}\n"
     )
-    _send(to_email, f"Your meeting: {title}", html, text)
+    _send(to_email, f"Your meeting: {title} @ {date} {start_time} – {end_time}", html, text)
