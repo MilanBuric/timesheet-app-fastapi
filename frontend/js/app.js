@@ -4,6 +4,9 @@ const app = (() => {
   let reportPeriod = 'week';
   let reportOffset = 0;
   let currentReport = null;
+  let calendarYear, calendarMonth;
+  let selectedCalendarDate = null;
+  let monthMeetings = [];
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
@@ -558,19 +561,70 @@ const app = (() => {
 
   // ── Meetings ──────────────────────────────────────────────────────────────
 
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function monthRange(year, month) {
+    const from = `${year}-${pad(month + 1)}-01`;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const to = `${year}-${pad(month + 1)}-${pad(lastDay)}`;
+    return { from, to };
+  }
+
   async function loadMeetingsView() {
+    if (calendarYear === undefined) {
+      const now = new Date();
+      calendarYear = now.getFullYear();
+      calendarMonth = now.getMonth();
+    }
     try {
-      const [users, list] = await Promise.all([api.getBasicUsers(), api.getMeetings()]);
+      const users = await api.getBasicUsers();
       meetings.renderAttendeeOptions(users, currentUser.id);
-      meetings.renderList(list, currentUser);
-      if (!document.getElementById('meeting-date').value) {
-        document.getElementById('meeting-date').value = today();
-      }
       const emailInput = document.getElementById('my-email');
       if (emailInput && document.activeElement !== emailInput) {
         emailInput.value = currentUser.email || '';
       }
+      await refreshCalendarMonth();
     } catch { alert('Failed to load meetings.'); }
+  }
+
+  async function refreshCalendarMonth() {
+    const { from, to } = monthRange(calendarYear, calendarMonth);
+    monthMeetings = await api.getMeetings({ date_from: from, date_to: to });
+    meetings.renderCalendar(calendarYear, calendarMonth, monthMeetings, selectedCalendarDate, today());
+    if (selectedCalendarDate) renderSidebarForSelectedDate();
+  }
+
+  function renderSidebarForSelectedDate() {
+    const dayMeetings = monthMeetings.filter(m => m.date === selectedCalendarDate);
+    const label = selectedCalendarDate === today() ? 'Today' : meetings.formatDate(selectedCalendarDate);
+    document.getElementById('sidebar-date-label').textContent = label;
+    document.getElementById('meeting-date').value = selectedCalendarDate;
+    meetings.renderList(dayMeetings, currentUser);
+  }
+
+  function openMeetingPanel() {
+    document.getElementById('meeting-panel').classList.remove('hidden');
+    document.getElementById('meeting-panel-overlay').classList.remove('hidden');
+  }
+
+  function closeMeetingPanel() {
+    document.getElementById('meeting-panel').classList.add('hidden');
+    document.getElementById('meeting-panel-overlay').classList.add('hidden');
+    selectedCalendarDate = null;
+    meetings.renderCalendar(calendarYear, calendarMonth, monthMeetings, selectedCalendarDate, today());
+  }
+
+  async function shiftCalendarMonth(delta) {
+    calendarMonth += delta;
+    if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+    if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+    await refreshCalendarMonth();
+  }
+
+  function selectCalendarDate(dateStr) {
+    selectedCalendarDate = dateStr;
+    meetings.renderCalendar(calendarYear, calendarMonth, monthMeetings, selectedCalendarDate, today());
+    renderSidebarForSelectedDate();
+    openMeetingPanel();
   }
 
   async function saveMyEmail() {
@@ -587,7 +641,7 @@ const app = (() => {
   async function respondToMeeting(id, status) {
     try {
       await api.rsvpMeeting(id, status);
-      await loadMeetingsView();
+      await refreshCalendarMonth();
     } catch { alert('Failed to respond to meeting.'); }
   }
 
@@ -638,7 +692,11 @@ const app = (() => {
       document.getElementById('meeting-use-google-meet').checked = false;
       toggleGoogleMeetOption();
       meetings.clearAttendeeSelection();
-      await loadMeetingsView();
+      // Jump the calendar to the newly-scheduled date so the new meeting
+      // is immediately visible, even if it's in a different month.
+      const [y, m] = date.split('-').map(Number);
+      calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
+      await refreshCalendarMonth();
     } catch (err) { alert(err.message || 'Failed to schedule meeting.'); }
   }
 
@@ -646,7 +704,7 @@ const app = (() => {
     if (!confirm('Cancel this meeting?')) return;
     try {
       await api.deleteMeeting(id);
-      await loadMeetingsView();
+      await refreshCalendarMonth();
     } catch { alert('Failed to cancel meeting.'); }
   }
 
@@ -682,6 +740,7 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail, toggleMeetingLocation, toggleGoogleMeetOption
+    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail, toggleMeetingLocation, toggleGoogleMeetOption,
+    shiftCalendarMonth, selectCalendarDate, closeMeetingPanel
   };
 })();

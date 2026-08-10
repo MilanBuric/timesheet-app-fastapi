@@ -85,7 +85,9 @@ def _build_card_html(title: str, date: str, start_time: str, end_time: str,
          border-radius:4px;text-decoration:none;display:inline-block;font-size:14px;
          font-weight:500;white-space:nowrap;">Join with Google Meet</a>
       <div style="margin-top:14px;font-size:12px;color:#5f6368;">Meeting link</div>
-      <div style="font-size:13px;color:#202124;word-break:break-all;">{meeting_link}</div>
+      <div style="font-size:13px;word-break:break-all;">
+        <a href="{meeting_link}" style="color:#202124;text-decoration:none;">{meeting_link}</a>
+      </div>
     """ if (location_type == "online" and meeting_link) else ""
 
     card_html = f"""

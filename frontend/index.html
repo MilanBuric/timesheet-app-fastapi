@@ -226,66 +226,92 @@
             </div>
           </div>
         </div>
-        <div class="card">
-          <h2 class="card-title">Schedule a meeting</h2>
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="meeting-title">Title</label>
-              <input type="text" id="meeting-title" placeholder="e.g. Sprint planning" />
-            </div>
-            <div class="form-group">
-              <label for="meeting-date">Date</label>
-              <input type="date" id="meeting-date" />
-            </div>
-            <div class="form-group">
-              <label for="meeting-start">Start time</label>
-              <input type="time" id="meeting-start" />
-            </div>
-            <div class="form-group">
-              <label for="meeting-end">End time</label>
-              <input type="time" id="meeting-end" />
-            </div>
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Location</label>
-              <div class="location-toggle">
-                <label class="location-option">
-                  <input type="radio" name="meeting-location-type" value="online" checked onchange="app.toggleMeetingLocation()" />
-                  <span>💻 Online</span>
-                </label>
-                <label class="location-option">
-                  <input type="radio" name="meeting-location-type" value="in_person" onchange="app.toggleMeetingLocation()" />
-                  <span>📍 In person</span>
-                </label>
-              </div>
-            </div>
-            <div class="form-group" id="meeting-link-group" style="grid-column:1/-1;">
-              <label class="checkbox-label">
-                <input type="checkbox" id="meeting-use-google-meet" onchange="app.toggleGoogleMeetOption()" />
-                <span>🎥 Auto-generate a Google Meet link</span>
-              </label>
-              <label for="meeting-link" id="meeting-link-label">Meeting link (optional)</label>
-              <input type="url" id="meeting-link" placeholder="e.g. https://meet.google.com/..." />
-            </div>
-            <div class="form-group hidden" id="meeting-room-group" style="grid-column:1/-1;">
-              <label for="meeting-room">Room</label>
-              <input type="text" id="meeting-room" placeholder="e.g. Conference Room B" />
-            </div>
-            <div class="form-group" style="grid-column:1/-1;">
-              <label for="meeting-description">Description</label>
-              <input type="text" id="meeting-description" placeholder="Optional details" />
-            </div>
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Attendees</label>
-              <div id="meeting-attendees-list" class="attendees-list"></div>
-            </div>
+
+        <div class="card calendar-card">
+          <div class="calendar-header">
+            <button class="btn-icon" onclick="app.shiftCalendarMonth(-1)" title="Previous month">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <h2 class="card-title calendar-month-label" id="calendar-month-label">Month Year</h2>
+            <button class="btn-icon" onclick="app.shiftCalendarMonth(1)" title="Next month">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
           </div>
-          <div class="form-actions">
-            <button class="btn btn-primary" onclick="app.scheduleMeeting()">Schedule meeting</button>
+          <div class="calendar-weekdays">
+            <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
           </div>
+          <div id="calendar-grid" class="calendar-grid"></div>
         </div>
-        <div class="card">
-          <h2 class="card-title">Meetings</h2>
-          <div id="meetings-container"></div>
+
+        <div class="panel-overlay hidden" id="meeting-panel-overlay" onclick="app.closeMeetingPanel()"></div>
+        <div class="meeting-panel hidden" id="meeting-panel">
+          <div class="meeting-panel-header">
+            <h2 class="card-title" id="sidebar-date-label" style="margin:0;">Meetings</h2>
+            <button class="btn-icon" onclick="app.closeMeetingPanel()" title="Close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="meeting-panel-body">
+            <div id="sidebar-meetings-list"></div>
+
+            <div class="panel-divider"></div>
+
+            <h2 class="card-title">Schedule a meeting</h2>
+              <div class="form-grid form-grid-single">
+                <div class="form-group">
+                  <label for="meeting-title">Title</label>
+                  <input type="text" id="meeting-title" placeholder="e.g. Sprint planning" />
+                </div>
+                <div class="form-group">
+                  <label for="meeting-date">Date</label>
+                  <input type="date" id="meeting-date" />
+                </div>
+                <div class="form-group">
+                  <label for="meeting-start">Start time</label>
+                  <input type="time" id="meeting-start" />
+                </div>
+                <div class="form-group">
+                  <label for="meeting-end">End time</label>
+                  <input type="time" id="meeting-end" />
+                </div>
+                <div class="form-group">
+                  <label>Location</label>
+                  <div class="location-toggle">
+                    <label class="location-option">
+                      <input type="radio" name="meeting-location-type" value="online" checked onchange="app.toggleMeetingLocation()" />
+                      <span>💻 Online</span>
+                    </label>
+                    <label class="location-option">
+                      <input type="radio" name="meeting-location-type" value="in_person" onchange="app.toggleMeetingLocation()" />
+                      <span>📍 In person</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="form-group" id="meeting-link-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="meeting-use-google-meet" onchange="app.toggleGoogleMeetOption()" />
+                    <span>🎥 Auto-generate a Google Meet link</span>
+                  </label>
+                  <label for="meeting-link" id="meeting-link-label">Meeting link (optional)</label>
+                  <input type="url" id="meeting-link" placeholder="e.g. https://meet.google.com/..." />
+                </div>
+                <div class="form-group hidden" id="meeting-room-group">
+                  <label for="meeting-room">Room</label>
+                  <input type="text" id="meeting-room" placeholder="e.g. Conference Room B" />
+                </div>
+                <div class="form-group">
+                  <label for="meeting-description">Description</label>
+                  <input type="text" id="meeting-description" placeholder="Optional details" />
+                </div>
+                <div class="form-group">
+                  <label>Attendees</label>
+                  <div id="meeting-attendees-list" class="attendees-list"></div>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" onclick="app.scheduleMeeting()">Schedule meeting</button>
+              </div>
+          </div>
         </div>
       </section>
 

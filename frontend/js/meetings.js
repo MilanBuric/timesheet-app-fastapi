@@ -52,9 +52,9 @@ const meetings = (() => {
   }
 
   function renderList(list, currentUser) {
-    const container = document.getElementById('meetings-container');
+    const container = document.getElementById('sidebar-meetings-list');
     if (!list.length) {
-      container.innerHTML = '<div class="empty">No meetings scheduled.</div>';
+      container.innerHTML = '<div class="empty">No meetings on this date.</div>';
       return;
     }
     container.innerHTML = list.map(m => {
@@ -65,7 +65,6 @@ const meetings = (() => {
         <div class="meeting-card">
           <div class="meeting-card-header">
             <div>
-              <span class="meeting-date">${formatDate(m.date)}</span>
               <span class="meeting-time">${m.start_time} – ${m.end_time}</span>
             </div>
             ${canCancel ? `<button class="btn-icon danger" onclick="app.cancelMeeting(${m.id})" title="Cancel meeting">${cancelIcon()}</button>` : ''}
@@ -88,5 +87,49 @@ const meetings = (() => {
     }).join('');
   }
 
-  return { renderAttendeeOptions, getSelectedAttendees, clearAttendeeSelection, renderList };
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  const MAX_CHIPS_PER_DAY = 3;
+
+  function renderCalendar(year, month, meetingsList, selectedDate, todayStr) {
+    document.getElementById('calendar-month-label').textContent = `${MONTH_NAMES[month]} ${year}`;
+
+    const byDate = {};
+    meetingsList.forEach(m => {
+      (byDate[m.date] = byDate[m.date] || []).push(m);
+    });
+
+    const firstWeekday = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const grid = document.getElementById('calendar-grid');
+
+    let html = '';
+    for (let i = 0; i < firstWeekday; i++) {
+      html += `<div class="calendar-day empty"></div>`;
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${pad(month + 1)}-${pad(day)}`;
+      const classes = ['calendar-day'];
+      if (dateStr === todayStr) classes.push('today');
+      if (dateStr === selectedDate) classes.push('selected');
+
+      const dayMeetings = byDate[dateStr] || [];
+      const chips = dayMeetings.slice(0, MAX_CHIPS_PER_DAY)
+        .map(m => `<div class="calendar-event-chip">${m.start_time} ${m.title}</div>`).join('');
+      const extra = dayMeetings.length > MAX_CHIPS_PER_DAY
+        ? `<div class="calendar-event-more">+${dayMeetings.length - MAX_CHIPS_PER_DAY} more</div>` : '';
+
+      html += `
+        <div class="${classes.join(' ')}" onclick="app.selectCalendarDate('${dateStr}')">
+          <span class="calendar-day-number">${day}</span>
+          ${chips}${extra}
+        </div>`;
+    }
+    grid.innerHTML = html;
+  }
+
+  return { renderAttendeeOptions, getSelectedAttendees, clearAttendeeSelection, renderList, renderCalendar, formatDate };
 })();
