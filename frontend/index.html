@@ -30,7 +30,55 @@
         </div>
         <p id="login-error" class="login-error"></p>
         <button type="submit" class="btn btn-primary" style="width:100%;height:40px;">Sign in</button>
+        <p style="text-align:center;margin-top:14px;">
+          <a href="#" onclick="app.showForgotPassword(); return false;" style="font-size:13px;color:var(--text-muted);">Forgot password?</a>
+        </p>
       </form>
+    </div>
+  </div>
+
+  <!-- Forgot password screen -->
+  <div id="forgot-password-screen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span>Timesheet</span>
+      </div>
+      <h2 class="login-title">Reset password</h2>
+      <p class="login-subtitle">Enter your username and we'll email you a reset link, if an email's on file.</p>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label for="forgot-username">Username</label>
+        <input type="text" id="forgot-username" placeholder="e.g. intern" autocomplete="username" />
+      </div>
+      <p id="forgot-password-message" class="login-error" style="color:var(--text-muted);"></p>
+      <button class="btn btn-primary" style="width:100%;height:40px;" onclick="app.submitForgotPassword()">Send reset link</button>
+      <p style="text-align:center;margin-top:14px;">
+        <a href="#" onclick="app.showLoginFromForgot(); return false;" style="font-size:13px;color:var(--text-muted);">Back to sign in</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Reset password screen (reached via emailed link with ?reset_token=...) -->
+  <div id="reset-password-screen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span>Timesheet</span>
+      </div>
+      <h2 class="login-title">Choose a new password</h2>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label for="reset-new-password">New password</label>
+        <input type="password" id="reset-new-password" placeholder="min. 6 characters" autocomplete="new-password" />
+      </div>
+      <p id="reset-password-message" class="login-error"></p>
+      <button class="btn btn-primary" style="width:100%;height:40px;" onclick="app.submitResetPassword()">Set new password</button>
+      <p style="text-align:center;margin-top:14px;">
+        <a href="#" onclick="app.showLoginFromForgot(); return false;" style="font-size:13px;color:var(--text-muted);">Back to sign in</a>
+      </p>
     </div>
   </div>
 
@@ -227,7 +275,16 @@
           </div>
         </div>
 
-        <div class="card calendar-card">
+        <div class="card">
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="meeting-search">Search meetings</label>
+            <input type="text" id="meeting-search" placeholder="Search by title, room, or attendee…"
+                   oninput="app.onMeetingSearchInput(this.value)" />
+          </div>
+          <div id="meeting-search-results" class="meeting-search-results hidden"></div>
+        </div>
+
+        <div class="card calendar-card" id="meetings-calendar-card">
           <div class="calendar-header">
             <button class="btn-icon" onclick="app.shiftCalendarMonth(-1)" title="Previous month">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -257,7 +314,7 @@
             <div class="panel-divider"></div>
 
             <h2 class="card-title">Schedule a meeting</h2>
-              <div class="form-grid form-grid-single">
+              <div class="form-grid-single">
                 <div class="form-group">
                   <label for="meeting-title">Title</label>
                   <input type="text" id="meeting-title" placeholder="e.g. Sprint planning" />
@@ -266,13 +323,29 @@
                   <label for="meeting-date">Date</label>
                   <input type="date" id="meeting-date" />
                 </div>
-                <div class="form-group">
-                  <label for="meeting-start">Start time</label>
-                  <input type="time" id="meeting-start" />
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label for="meeting-start">Start time</label>
+                    <input type="time" id="meeting-start" />
+                  </div>
+                  <div class="form-group">
+                    <label for="meeting-end">End time</label>
+                    <input type="time" id="meeting-end" />
+                  </div>
                 </div>
                 <div class="form-group">
-                  <label for="meeting-end">End time</label>
-                  <input type="time" id="meeting-end" />
+                  <label>Repeats</label>
+                  <select id="meeting-recurrence" onchange="app.toggleRecurrence()">
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Every 2 weeks</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div class="form-group hidden" id="meeting-recurrence-until-group">
+                  <label for="meeting-recurrence-until">Repeat until</label>
+                  <input type="date" id="meeting-recurrence-until" />
                 </div>
                 <div class="form-group">
                   <label>Location</label>
@@ -297,7 +370,8 @@
                 </div>
                 <div class="form-group hidden" id="meeting-room-group">
                   <label for="meeting-room">Room</label>
-                  <input type="text" id="meeting-room" placeholder="e.g. Conference Room B" />
+                  <input type="text" id="meeting-room" list="room-options" placeholder="e.g. Conference Room B" />
+                  <datalist id="room-options"></datalist>
                 </div>
                 <div class="form-group">
                   <label for="meeting-description">Description</label>
@@ -320,6 +394,11 @@
         <div class="card">
           <h2 class="card-title">Intern hourly rates</h2>
           <div id="users-container"></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Meeting rooms</h2>
+          <p class="card-subtitle">Rooms configured here show up as suggestions (with capacity/equipment) when scheduling an in-person meeting.</p>
+          <div id="rooms-container"></div>
         </div>
       </section>
     </main>
@@ -371,6 +450,33 @@
       <div class="form-actions">
         <button class="btn" onclick="app.closeRejectModal()">Cancel</button>
         <button class="btn btn-danger" onclick="app.confirmReject()">Reject entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reschedule meeting modal -->
+  <div class="modal-overlay hidden" id="reschedule-modal">
+    <div class="modal">
+      <h2 class="card-title">Reschedule <span id="reschedule-title-label"></span></h2>
+      <input type="hidden" id="reschedule-meeting-id" />
+      <div class="form-group" style="margin-bottom:12px;">
+        <label for="reschedule-date">Date</label>
+        <input type="date" id="reschedule-date" />
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label for="reschedule-start">Start time</label>
+          <input type="time" id="reschedule-start" />
+        </div>
+        <div class="form-group">
+          <label for="reschedule-end">End time</label>
+          <input type="time" id="reschedule-end" />
+        </div>
+      </div>
+      <p class="meeting-location-info" style="margin-top:12px;">Guests will be notified and asked to RSVP again.</p>
+      <div class="form-actions" style="margin-top:12px;">
+        <button class="btn" onclick="app.closeRescheduleForm()">Cancel</button>
+        <button class="btn btn-primary" onclick="app.submitReschedule()">Save new time</button>
       </div>
     </div>
   </div>

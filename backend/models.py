@@ -122,10 +122,40 @@ class AttendeeInfo(BaseModel):
     id: int
     username: str
     status: str = "pending"
+    decline_reason: Optional[str] = None
 
 
 class RSVPRequest(BaseModel):
     status: str = Field(..., pattern="^(accepted|declined)$")
+    reason: Optional[str] = Field(None, max_length=500)
+
+
+class RoomCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    capacity: Optional[int] = Field(None, ge=1)
+    equipment: Optional[str] = Field(None, max_length=300)
+
+
+class RoomUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    capacity: Optional[int] = Field(None, ge=1)
+    equipment: Optional[str] = Field(None, max_length=300)
+
+
+class RoomResponse(BaseModel):
+    id: int
+    name: str
+    capacity: Optional[int] = None
+    equipment: Optional[str] = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=50)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=6)
 
 
 class MeetingCreate(BaseModel):
@@ -139,6 +169,14 @@ class MeetingCreate(BaseModel):
     meeting_link: Optional[str] = Field(None, max_length=500)
     use_google_meet: bool = False
     attendee_ids: list[int] = []
+    recurrence: str = Field("none", pattern="^(none|daily|weekly|biweekly|monthly)$")
+    recurrence_until: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class MeetingReschedule(BaseModel):
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
 
 
 class MeetingResponse(BaseModel):
@@ -155,3 +193,8 @@ class MeetingResponse(BaseModel):
     meeting_link: Optional[str] = None
     attendees: list[AttendeeInfo] = []
     created_at: str
+    recurrence_rule: str = "none"
+    recurrence_group_id: Optional[str] = None
+    series_count: Optional[int] = None
+    skipped_dates: Optional[list[str]] = None
+    ics_sequence: int = 0

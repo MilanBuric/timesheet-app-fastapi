@@ -29,6 +29,7 @@ import os
 import smtplib
 import ssl
 from email.message import EmailMessage
+import ics_utils
 
 try:
     from dotenv import load_dotenv
@@ -112,13 +113,21 @@ def _pill_button(label: str, href: str, color: str) -> str:
     """
 
 
-def _send(to_email: str, subject: str, html: str, text: str) -> None:
+def _send(to_email: str, subject: str, html: str, text: str, ics_content: str = None,
+          ics_method: str = "REQUEST") -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_USERNAME}>" if SMTP_USERNAME else SMTP_FROM_NAME
     msg["To"] = to_email
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")
+    if ics_content:
+        msg.add_attachment(
+            ics_content.encode("utf-8"),
+            maintype="text", subtype="calendar",
+            filename="invite.ics",
+            params={"method": ics_method, "charset": "UTF-8"}
+        )
 
     if not SMTP_USERNAME or not SMTP_PASSWORD:
         print(f"⚠️  SMTP not configured — printing email instead of sending to {to_email}:\n{text}")
@@ -139,7 +148,9 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
                          title: str, date: str, start_time: str, end_time: str,
                          description: str, rsvp_token: str,
                          location_type: str = "online", room: str = None,
-                         meeting_link: str = None, guests: list = None) -> None:
+                         meeting_link: str = None, guests: list = None,
+                         meeting_id: int = None, sequence: int = 0,
+                         organizer_email: str = None, attendee_emails: list = None) -> None:
     accept_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=accept"
     decline_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=decline"
 
@@ -161,7 +172,7 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
         <td>{_pill_button("No", decline_url, "#5f6368")}</td>
       </tr></table>
       <p style="color:#999;font-size:12px;margin-top:20px;">
-        You can also respond from inside the Timesheet App.
+        You can also respond from inside the Timesheet App. A calendar invite (.ics) is attached.
       </p>
     </div>
     </body></html>
@@ -175,7 +186,140 @@ def send_meeting_invite(to_email: str, attendee_name: str, organizer_name: str,
         f"Reply for {to_email}\n"
         f"Yes: {accept_url}\nNo: {decline_url}\n"
     )
-    _send(to_email, f"Invitation: {title} @ {date} {start_time} – {end_time}", html, text)
+    ics_content = None
+    if meeting_id is not None:
+        ics_content = ics_utils.build_ics(
+            meeting_id=meeting_id, sequence=sequence, title=title, description=description,
+            date=date, start_time=start_time, end_time=end_time,
+            organizer_email=organizer_email, organizer_name=organizer_name,
+            attendee_emails=attendee_emails or [], location_text=location_text
+        )
+    _send(to_email, f"Invitation: {title} @ {date} {start_time} – {end_time}", html, text, ics_content=ics_content)
+
+
+def send_meeting_reschedule_notice(to_email: str, attendee_name: str, organizer_name: str,
+                                    title: str, date: str, start_time: str, end_time: str,
+                                    description: str, rsvp_token: str,
+                                    old_date: str, old_start_time: str, old_end_time: str,
+                                    location_type: str = "online", room: str = None,
+                                    meeting_link: str = None, guests: list = None,
+                                    meeting_id: int = None, sequence: int = 0,
+                                    organizer_email: str = None, attendee_emails: list = None) -> None:
+    """
+    Sent to attendees when the organizer changes a meeting's date/time.
+    Carries fresh Accept/Decline links since the old RSVP is reset — the
+    old link's token is invalidated server-side once this goes out.
+    """
+    accept_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=accept"
+    decline_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=decline"
+
+    card_html, location_text, guest_lines = _build_card_html(
+        title, date, start_time, end_time, description, location_type, room,
+        meeting_link, organizer_name, guests
+    )
+
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
+      <p style="font-size:13px;color:#b45309;background:#fffbeb;padding:8px 12px;
+                border-radius:6px;margin-bottom:14px;">
+        ⏰ This meeting was rescheduled — was {old_date}, {old_start_time} – {old_end_time}
+      </p>
+      {card_html}
+      <p style="font-size:13px;color:#5f6368;margin:16px 0 8px;">
+        Please confirm you can still make it, {to_email}
+      </p>
+      <table cellpadding="0" cellspacing="0"><tr>
+        <td style="padding-right: 8px;">{_pill_button("Yes", accept_url, "#1a73e8")}</td>
+        <td>{_pill_button("No", decline_url, "#5f6368")}</td>
+      </tr></table>
+      <p style="color:#999;font-size:12px;margin-top:20px;">
+        You can also respond from inside the Timesheet App. An updated calendar invite (.ics) is attached.
+      </p>
+    </div>
+    </body></html>
+    """
+    text = (
+        f"{title} — RESCHEDULED\n"
+        f"Was: {old_date}, {old_start_time} - {old_end_time}\n"
+        f"Now: {date}, {start_time} - {end_time}\n"
+        f"{location_text}\n\n"
+        f"{description or ''}\n\n"
+        f"Guests:\n{guest_lines}\n\n"
+        f"Please confirm you can still make it.\n"
+        f"Yes: {accept_url}\nNo: {decline_url}\n"
+    )
+    ics_content = None
+    if meeting_id is not None:
+        ics_content = ics_utils.build_ics(
+            meeting_id=meeting_id, sequence=sequence, title=title, description=description,
+            date=date, start_time=start_time, end_time=end_time,
+            organizer_email=organizer_email, organizer_name=organizer_name,
+            attendee_emails=attendee_emails or [], location_text=location_text
+        )
+    _send(to_email, f"Rescheduled: {title} @ {date} {start_time} – {end_time}", html, text, ics_content=ics_content)
+
+
+def send_password_reset(to_email: str, username: str, reset_url: str) -> None:
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+      <div style="background:#f1f3f4;border-radius:10px;padding:20px 24px;">
+        <div style="font-size:19px;color:#202124;font-weight:500;">Reset your password</div>
+        <div style="font-size:13px;color:#3c4043;margin-top:10px;">
+          Hi {username}, someone requested a password reset for your Timesheet App account.
+          If this was you, click below to choose a new password. This link expires in 1 hour.
+        </div>
+        <a href="{reset_url}" style="margin-top:16px;display:inline-block;background:#1a73e8;color:#fff;
+           padding:8px 18px;border-radius:4px;text-decoration:none;font-size:13px;">Reset password</a>
+        <div style="font-size:12px;color:#5f6368;margin-top:14px;">
+          If you didn't request this, you can safely ignore this email.
+        </div>
+      </div>
+    </div>
+    </body></html>
+    """
+    text = (
+        f"Reset your password\n\n"
+        f"Hi {username}, someone requested a password reset for your Timesheet App account.\n"
+        f"If this was you, open this link to choose a new password (expires in 1 hour):\n{reset_url}\n\n"
+        f"If you didn't request this, you can ignore this email.\n"
+    )
+    _send(to_email, "Reset your Timesheet App password", html, text)
+
+
+def send_meeting_reminder(to_email: str, recipient_name: str, title: str,
+                           date: str, start_time: str, end_time: str,
+                           location_type: str = "online", room: str = None,
+                           meeting_link: str = None) -> None:
+    """Sent a short while before a meeting starts (see reminders.py)."""
+    if location_type == "in_person":
+        where = f"Room: {room}"
+    elif meeting_link:
+        where = f"Join: {meeting_link}"
+    else:
+        where = "Online"
+
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+      <div style="background:#f1f3f4;border-radius:10px;padding:20px 24px;">
+        <div style="font-size:12px;color:#5f6368;">Starting soon</div>
+        <div style="font-size:19px;color:#202124;font-weight:500;margin-top:4px;">{title}</div>
+        <div style="font-size:13px;color:#3c4043;margin-top:10px;">
+          {date} &nbsp;·&nbsp; {start_time} – {end_time}
+        </div>
+        <div style="font-size:13px;color:#3c4043;margin-top:6px;">{where}</div>
+        {f'<a href="{meeting_link}" style="margin-top:14px;display:inline-block;background:#1a73e8;color:#fff;padding:8px 18px;border-radius:4px;text-decoration:none;font-size:13px;">Join with Google Meet</a>' if (location_type == "online" and meeting_link) else ""}
+      </div>
+    </div>
+    </body></html>
+    """
+    text = f"Reminder: {title} starts soon\n{date}, {start_time} - {end_time}\n{where}\n"
+    _send(to_email, f"Starting soon: {title} @ {start_time}", html, text)
 
 
 def send_organizer_confirmation(to_email: str, organizer_name: str,

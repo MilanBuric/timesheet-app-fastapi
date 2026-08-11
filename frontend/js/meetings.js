@@ -8,6 +8,14 @@ const meetings = (() => {
     return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
   }
 
+  function rescheduleIcon() {
+    return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>`;
+  }
+
+  function repeatIcon() {
+    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>`;
+  }
+
   function renderAttendeeOptions(users, currentUserId) {
     const container = document.getElementById('meeting-attendees-list');
     const options = users.filter(u => u.id !== currentUserId);
@@ -41,9 +49,24 @@ const meetings = (() => {
     return map[status] || '';
   }
 
+  let roomsByName = {};
+
+  function setRooms(rooms) {
+    roomsByName = {};
+    (rooms || []).forEach(r => { roomsByName[r.name] = r; });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   function locationInfo(m) {
     if (m.location_type === 'in_person') {
-      return `<div class="meeting-room-tag">📍 ${m.room}</div>`;
+      const room = roomsByName[m.room];
+      const meta = room && (room.capacity || room.equipment)
+        ? ` <span class="room-meta">${room.capacity ? `· ${room.capacity} seats` : ''}${room.equipment ? ` · ${escapeHtml(room.equipment)}` : ''}</span>`
+        : '';
+      return `<div class="meeting-room-tag">📍 ${escapeHtml(m.room)}${meta}</div>`;
     }
     if (m.meeting_link) {
       return `<a href="${m.meeting_link}" target="_blank" rel="noopener" class="meeting-join-link">💻 Join meeting</a>`;
@@ -51,8 +74,16 @@ const meetings = (() => {
     return `<div class="meeting-location-info">💻 Online</div>`;
   }
 
+  let renderedById = {};
+
+  function getMeetingById(id) {
+    return renderedById[id] || null;
+  }
+
   function renderList(list, currentUser) {
     const container = document.getElementById('sidebar-meetings-list');
+    renderedById = {};
+    list.forEach(m => { renderedById[m.id] = m; });
     if (!list.length) {
       container.innerHTML = '<div class="empty">No meetings on this date.</div>';
       return;
@@ -66,25 +97,47 @@ const meetings = (() => {
           <div class="meeting-card-header">
             <div>
               <span class="meeting-time">${m.start_time} – ${m.end_time}</span>
+              ${m.recurrence_rule && m.recurrence_rule !== 'none' ? `<span class="recurring-badge" title="Repeats ${m.recurrence_rule}">${repeatIcon()} ${m.recurrence_rule}</span>` : ''}
             </div>
-            ${canCancel ? `<button class="btn-icon danger" onclick="app.cancelMeeting(${m.id})" title="Cancel meeting">${cancelIcon()}</button>` : ''}
+            ${canCancel ? `
+              <div class="meeting-card-actions">
+                <button class="btn-icon" onclick="app.openRescheduleForm(${m.id})" title="Reschedule">${rescheduleIcon()}</button>
+                <button class="btn-icon danger" onclick="app.cancelMeeting(${m.id}, ${m.recurrence_group_id ? `'${m.recurrence_group_id}'` : 'null'})" title="Cancel meeting">${cancelIcon()}</button>
+              </div>` : ''}
           </div>
           <h3 class="meeting-title">${m.title}</h3>
           ${m.description ? `<p class="meeting-desc">${m.description}</p>` : ''}
           <p class="meeting-organizer">Organized by ${m.organizer_username}</p>
           ${locationInfo(m)}
           ${m.attendees.length ? `<div class="meeting-attendees">${m.attendees.map(a =>
-            `<span class="attendee-tag">${a.username} ${statusBadge(a.status)}</span>`
+            `<span class="attendee-tag"${a.decline_reason ? ` title="Declined: ${escapeHtml(a.decline_reason)}"` : ''}>${escapeHtml(a.username)} ${statusBadge(a.status)}</span>`
           ).join('')}</div>` : ''}
           ${isInvitee && myAttendance.status === 'pending' ? `
             <div class="rsvp-actions">
               <button class="btn btn-primary btn-sm" onclick="app.respondToMeeting(${m.id}, 'accepted')">Accept</button>
-              <button class="btn btn-sm" onclick="app.respondToMeeting(${m.id}, 'declined')">Decline</button>
+              <button class="btn btn-sm" onclick="app.declineMeeting(${m.id})">Decline</button>
             </div>` : ''}
           ${isInvitee && myAttendance.status !== 'pending' ? `
-            <p class="my-rsvp-note">You ${myAttendance.status} this invite.</p>` : ''}
+            <p class="my-rsvp-note">You ${myAttendance.status} this invite.${myAttendance.decline_reason ? ` <em>"${escapeHtml(myAttendance.decline_reason)}"</em>` : ''}</p>` : ''}
         </div>`;
     }).join('');
+  }
+
+  function renderSearchResults(list) {
+    const container = document.getElementById('meeting-search-results');
+    if (!list.length) {
+      container.innerHTML = '<div class="empty">No meetings match your search.</div>';
+      return;
+    }
+    container.innerHTML = list.map(m => `
+      <div class="search-result-row" onclick="app.jumpToMeetingDate('${m.date}')">
+        <div class="search-result-date">${formatDate(m.date)}</div>
+        <div class="search-result-info">
+          <div class="search-result-title">${escapeHtml(m.title)}</div>
+          <div class="search-result-meta">${m.start_time} – ${m.end_time} · Organized by ${escapeHtml(m.organizer_username)}</div>
+        </div>
+      </div>
+    `).join('');
   }
 
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -131,5 +184,8 @@ const meetings = (() => {
     grid.innerHTML = html;
   }
 
-  return { renderAttendeeOptions, getSelectedAttendees, clearAttendeeSelection, renderList, renderCalendar, formatDate };
+  return {
+    renderAttendeeOptions, getSelectedAttendees, clearAttendeeSelection, renderList, renderCalendar,
+    formatDate, getMeetingById, setRooms, renderSearchResults
+  };
 })();

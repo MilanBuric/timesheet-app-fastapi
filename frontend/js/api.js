@@ -136,9 +136,70 @@ const api = (() => {
     if (!res.ok) throw new Error('Failed to cancel meeting');
   }
 
-  async function rsvpMeeting(id, status) {
-    const res = await request('POST', `/meetings/${id}/rsvp`, { status });
+  async function deleteMeetingSeries(groupId) {
+    const res = await request('DELETE', `/meetings/series/${groupId}`);
+    if (!res.ok) throw new Error('Failed to cancel the meeting series');
+  }
+
+  async function rescheduleMeeting(id, data) {
+    const res = await request('PATCH', `/meetings/${id}/reschedule`, data);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to reschedule meeting');
+    }
+    return res.json();
+  }
+
+  async function rsvpMeeting(id, status, reason = null) {
+    const res = await request('POST', `/meetings/${id}/rsvp`, { status, reason });
     if (!res.ok) throw new Error('Failed to respond to meeting');
+    return res.json();
+  }
+
+  async function getRooms() {
+    const res = await request('GET', '/rooms');
+    if (!res.ok) throw new Error('Failed to fetch rooms');
+    return res.json();
+  }
+
+  async function createRoom(data) {
+    const res = await request('POST', '/rooms', data);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to add room');
+    }
+    return res.json();
+  }
+
+  async function updateRoom(id, data) {
+    const res = await request('PATCH', `/rooms/${id}`, data);
+    if (!res.ok) throw new Error('Failed to update room');
+    return res.json();
+  }
+
+  async function deleteRoom(id) {
+    const res = await request('DELETE', `/rooms/${id}`);
+    if (!res.ok) throw new Error('Failed to delete room');
+  }
+
+  async function forgotPassword(username) {
+    const res = await fetch('/auth/forgot-password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username })
+    });
+    if (!res.ok) throw new Error('Failed to request password reset');
+    return res.json();
+  }
+
+  async function resetPassword(resetToken, newPassword) {
+    const res = await fetch('/auth/reset-password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: resetToken, new_password: newPassword })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to reset password');
+    }
     return res.json();
   }
 
@@ -187,7 +248,9 @@ const api = (() => {
     getEntries, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
     getStats, getWeeklyReport,
     clockIn, clockOut, getActiveSession,
-    getBasicUsers, getMeetings, createMeeting, deleteMeeting, rsvpMeeting,
-    updateMyEmail
+    getBasicUsers, getMeetings, createMeeting, deleteMeeting, deleteMeetingSeries,
+    rescheduleMeeting, rsvpMeeting, updateMyEmail,
+    getRooms, createRoom, updateRoom, deleteRoom,
+    forgotPassword, resetPassword
   };
 })();

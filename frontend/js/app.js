@@ -7,10 +7,14 @@ const app = (() => {
   let calendarYear, calendarMonth;
   let selectedCalendarDate = null;
   let monthMeetings = [];
+  let roomsList = [];
+  let meetingSearchDebounce = null;
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   async function bootstrap() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('reset_token')) { showResetPassword(); return; }
     if (!api.getToken()) { showLogin(); return; }
     try {
       currentUser = await api.me();
@@ -56,6 +60,70 @@ const app = (() => {
     showLogin();
   }
 
+  // ── Forgot / reset password ──────────────────────────────────────────────
+
+  function showForgotPassword() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('reset-password-screen').classList.add('hidden');
+    document.getElementById('forgot-password-screen').classList.remove('hidden');
+    document.getElementById('forgot-password-message').textContent = '';
+    document.getElementById('forgot-username').value = '';
+  }
+
+  function showLoginFromForgot() {
+    document.getElementById('forgot-password-screen').classList.add('hidden');
+    document.getElementById('reset-password-screen').classList.add('hidden');
+    // Drop any reset_token from the URL so refreshing doesn't reopen this screen
+    if (window.location.search.includes('reset_token')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    showLogin();
+  }
+
+  function showResetPassword() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('forgot-password-screen').classList.add('hidden');
+    document.getElementById('reset-password-screen').classList.remove('hidden');
+    document.getElementById('reset-password-message').textContent = '';
+    document.getElementById('reset-new-password').value = '';
+  }
+
+  async function submitForgotPassword() {
+    const username = document.getElementById('forgot-username').value.trim();
+    const msgEl = document.getElementById('forgot-password-message');
+    if (!username) { msgEl.textContent = 'Please enter your username.'; return; }
+    try {
+      const result = await api.forgotPassword(username);
+      msgEl.style.color = 'var(--success)';
+      msgEl.textContent = result.message;
+    } catch (err) {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = err.message || 'Something went wrong.';
+    }
+  }
+
+  async function submitResetPassword() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('reset_token');
+    const newPassword = document.getElementById('reset-new-password').value;
+    const msgEl = document.getElementById('reset-password-message');
+    if (!newPassword || newPassword.length < 6) {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = 'Password must be at least 6 characters.';
+      return;
+    }
+    try {
+      await api.resetPassword(token, newPassword);
+      window.history.replaceState({}, '', window.location.pathname);
+      msgEl.style.color = 'var(--success)';
+      msgEl.textContent = 'Password updated! Redirecting to sign in…';
+      setTimeout(showLogin, 1200);
+    } catch (err) {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = err.message || 'Failed to reset password.';
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────────
 
   async function init() {
@@ -87,7 +155,7 @@ const app = (() => {
         if (view === 'entries') quickFilter('week');
         if (view === 'report') { reportOffset = 0; renderReport(); }
         if (view === 'meetings') loadMeetingsView();
-        if (view === 'users') loadUsers();
+        if (view === 'users') { loadUsers(); loadRooms(); }
       });
     });
   }
@@ -559,6 +627,101 @@ const app = (() => {
     } catch { alert('Failed to save rate.'); }
   }
 
+  // ── Meeting rooms (manager) ──────────────────────────────────────────────
+
+  async function loadRooms() {
+    try {
+      const rooms = await api.getRooms();
+      const container = document.getElementById('rooms-container');
+      container.innerHTML = `
+        <div class="create-user-form">
+          <h3 style="font-size:14px;font-weight:500;margin-bottom:12px;">Add a room</h3>
+          <div style="display:grid;grid-template-columns:1.5fr 0.8fr 2fr auto;gap:10px;align-items:end;">
+            <div class="form-group">
+              <label for="new-room-name">Name</label>
+              <input type="text" id="new-room-name" placeholder="e.g. Conference Room B" />
+            </div>
+            <div class="form-group">
+              <label for="new-room-capacity">Capacity</label>
+              <input type="number" id="new-room-capacity" min="1" placeholder="8" />
+            </div>
+            <div class="form-group">
+              <label for="new-room-equipment">Equipment</label>
+              <input type="text" id="new-room-equipment" placeholder="e.g. Projector, Whiteboard" />
+            </div>
+            <button class="btn btn-primary" onclick="app.createRoom()" style="height:38px;">Add</button>
+          </div>
+          <p id="create-room-error" style="font-size:13px;color:var(--danger);margin-top:8px;min-height:18px;"></p>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:1rem;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Room</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Capacity</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Equipment</th>
+              <th style="border-bottom:1px solid var(--border);"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rooms.length ? rooms.map(r => `
+              <tr>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);">${r.name}</td>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);">
+                  <input type="number" id="room-capacity-${r.id}" value="${r.capacity ?? ''}" min="1"
+                    style="width:70px;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;" />
+                </td>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);">
+                  <input type="text" id="room-equipment-${r.id}" value="${r.equipment ? r.equipment.replace(/"/g, '&quot;') : ''}"
+                    style="width:100%;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;" />
+                </td>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);text-align:right;">
+                  <div style="display:flex;gap:6px;justify-content:flex-end;">
+                    <button class="btn" onclick="app.saveRoom(${r.id})">Save</button>
+                    <button class="btn-icon danger" onclick="app.deleteRoom(${r.id}, '${r.name.replace(/'/g, "\\'")}')" title="Delete room">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : `<tr><td colspan="4" style="padding:12px 0;color:var(--text-muted);">No rooms configured yet.</td></tr>`}
+          </tbody>
+        </table>`;
+    } catch { alert('Failed to load rooms.'); }
+  }
+
+  async function createRoom() {
+    const name = document.getElementById('new-room-name').value.trim();
+    const capacityRaw = document.getElementById('new-room-capacity').value;
+    const equipment = document.getElementById('new-room-equipment').value.trim();
+    const errEl = document.getElementById('create-room-error');
+    errEl.textContent = '';
+    if (!name) { errEl.textContent = 'Please enter a room name.'; return; }
+    try {
+      await api.createRoom({ name, capacity: capacityRaw ? parseInt(capacityRaw, 10) : null, equipment: equipment || null });
+      document.getElementById('new-room-name').value = '';
+      document.getElementById('new-room-capacity').value = '';
+      document.getElementById('new-room-equipment').value = '';
+      await loadRooms();
+    } catch (err) { errEl.textContent = err.message; }
+  }
+
+  async function saveRoom(roomId) {
+    const capacityRaw = document.getElementById(`room-capacity-${roomId}`).value;
+    const equipment = document.getElementById(`room-equipment-${roomId}`).value.trim();
+    try {
+      await api.updateRoom(roomId, { capacity: capacityRaw ? parseInt(capacityRaw, 10) : null, equipment: equipment || null });
+      await loadRooms();
+    } catch { alert('Failed to update room.'); }
+  }
+
+  async function deleteRoom(roomId, name) {
+    if (!confirm(`Delete room "${name}"?`)) return;
+    try {
+      await api.deleteRoom(roomId);
+      await loadRooms();
+    } catch { alert('Failed to delete room.'); }
+  }
+
   // ── Meetings ──────────────────────────────────────────────────────────────
 
   function pad(n) { return String(n).padStart(2, '0'); }
@@ -576,14 +739,30 @@ const app = (() => {
       calendarMonth = now.getMonth();
     }
     try {
-      const users = await api.getBasicUsers();
+      const [users, rooms] = await Promise.all([api.getBasicUsers(), api.getRooms()]);
       meetings.renderAttendeeOptions(users, currentUser.id);
+      roomsList = rooms;
+      meetings.setRooms(rooms);
+      populateRoomOptions();
       const emailInput = document.getElementById('my-email');
       if (emailInput && document.activeElement !== emailInput) {
         emailInput.value = currentUser.email || '';
       }
       await refreshCalendarMonth();
     } catch { alert('Failed to load meetings.'); }
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  function populateRoomOptions() {
+    const datalist = document.getElementById('room-options');
+    if (!datalist) return;
+    datalist.innerHTML = roomsList.map(r => {
+      const label = [r.capacity ? `${r.capacity} seats` : null, r.equipment || null].filter(Boolean).join(' · ');
+      return `<option value="${escapeAttr(r.name)}"${label ? ` label="${escapeAttr(label)}"` : ''}></option>`;
+    }).join('');
   }
 
   async function refreshCalendarMonth() {
@@ -627,6 +806,33 @@ const app = (() => {
     openMeetingPanel();
   }
 
+  function onMeetingSearchInput(value) {
+    clearTimeout(meetingSearchDebounce);
+    const query = value.trim();
+    const resultsEl = document.getElementById('meeting-search-results');
+    if (!query) {
+      resultsEl.classList.add('hidden');
+      resultsEl.innerHTML = '';
+      return;
+    }
+    meetingSearchDebounce = setTimeout(async () => {
+      try {
+        const results = await api.getMeetings({ search: query });
+        meetings.renderSearchResults(results);
+        resultsEl.classList.remove('hidden');
+      } catch { /* leave previous results visible on transient failure */ }
+    }, 300);
+  }
+
+  async function jumpToMeetingDate(dateStr) {
+    document.getElementById('meeting-search').value = '';
+    document.getElementById('meeting-search-results').classList.add('hidden');
+    const [y, m] = dateStr.split('-').map(Number);
+    calendarYear = y; calendarMonth = m - 1;
+    await refreshCalendarMonth();
+    selectCalendarDate(dateStr);
+  }
+
   async function saveMyEmail() {
     const email = document.getElementById('my-email').value.trim();
     try {
@@ -645,6 +851,15 @@ const app = (() => {
     } catch { alert('Failed to respond to meeting.'); }
   }
 
+  async function declineMeeting(id) {
+    const reason = prompt('Optional — let the organizer know why (leave blank to skip):');
+    if (reason === null) return; // cancelled the prompt
+    try {
+      await api.rsvpMeeting(id, 'declined', reason.trim() || null);
+      await refreshCalendarMonth();
+    } catch { alert('Failed to respond to meeting.'); }
+  }
+
   function toggleMeetingLocation() {
     const isInPerson = document.querySelector('input[name="meeting-location-type"]:checked').value === 'in_person';
     document.getElementById('meeting-room-group').classList.toggle('hidden', !isInPerson);
@@ -658,6 +873,11 @@ const app = (() => {
     if (useGoogleMeet) document.getElementById('meeting-link').value = '';
   }
 
+  function toggleRecurrence() {
+    const repeats = document.getElementById('meeting-recurrence').value !== 'none';
+    document.getElementById('meeting-recurrence-until-group').classList.toggle('hidden', !repeats);
+  }
+
   async function scheduleMeeting() {
     const title = document.getElementById('meeting-title').value.trim();
     const date = document.getElementById('meeting-date').value;
@@ -669,6 +889,8 @@ const app = (() => {
     const meeting_link = document.getElementById('meeting-link').value.trim();
     const use_google_meet = document.getElementById('meeting-use-google-meet').checked;
     const attendee_ids = meetings.getSelectedAttendees();
+    const recurrence = document.getElementById('meeting-recurrence').value;
+    const recurrence_until = document.getElementById('meeting-recurrence-until').value;
     if (!title || !date || !start_time || !end_time) {
       alert('Please fill in title, date, start time, and end time.');
       return;
@@ -677,35 +899,95 @@ const app = (() => {
       alert('Please specify a room for an in-person meeting.');
       return;
     }
+    if (recurrence !== 'none' && !recurrence_until) {
+      alert('Please choose an end date for the recurring series.');
+      return;
+    }
     try {
-      await api.createMeeting({
+      const result = await api.createMeeting({
         title, date, start_time, end_time, description: description || null, attendee_ids,
         location_type,
         room: location_type === 'in_person' ? room : null,
         meeting_link: location_type === 'online' ? (meeting_link || null) : null,
-        use_google_meet: location_type === 'online' ? use_google_meet : false
+        use_google_meet: location_type === 'online' ? use_google_meet : false,
+        recurrence, recurrence_until: recurrence !== 'none' ? recurrence_until : null
       });
       document.getElementById('meeting-title').value = '';
       document.getElementById('meeting-description').value = '';
       document.getElementById('meeting-room').value = '';
       document.getElementById('meeting-link').value = '';
       document.getElementById('meeting-use-google-meet').checked = false;
+      document.getElementById('meeting-recurrence').value = 'none';
+      document.getElementById('meeting-recurrence-until').value = '';
       toggleGoogleMeetOption();
+      toggleRecurrence();
       meetings.clearAttendeeSelection();
       // Jump the calendar to the newly-scheduled date so the new meeting
       // is immediately visible, even if it's in a different month.
       const [y, m] = date.split('-').map(Number);
       calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
       await refreshCalendarMonth();
+      if (result.series_count) {
+        let msg = `Scheduled ${result.series_count} occurrences.`;
+        if (result.skipped_dates && result.skipped_dates.length) {
+          msg += `\n\nSkipped (room already booked): ${result.skipped_dates.join(', ')}`;
+        }
+        alert(msg);
+      }
     } catch (err) { alert(err.message || 'Failed to schedule meeting.'); }
   }
 
-  async function cancelMeeting(id) {
-    if (!confirm('Cancel this meeting?')) return;
+  async function cancelMeeting(id, groupId) {
     try {
-      await api.deleteMeeting(id);
+      if (groupId) {
+        if (confirm('This meeting is part of a recurring series.\n\nOK = cancel the ENTIRE series\nCancel = choose to cancel just this one occurrence')) {
+          await api.deleteMeetingSeries(groupId);
+        } else if (confirm('Cancel just this one occurrence?')) {
+          await api.deleteMeeting(id);
+        } else {
+          return;
+        }
+      } else {
+        if (!confirm('Cancel this meeting?')) return;
+        await api.deleteMeeting(id);
+      }
       await refreshCalendarMonth();
     } catch { alert('Failed to cancel meeting.'); }
+  }
+
+  // ── Reschedule ────────────────────────────────────────────────────────────
+
+  function openRescheduleForm(meetingId) {
+    const meeting = meetings.getMeetingById(meetingId);
+    if (!meeting) { alert('Could not find that meeting — try reopening the day.'); return; }
+    document.getElementById('reschedule-meeting-id').value = meeting.id;
+    document.getElementById('reschedule-title-label').textContent = meeting.title;
+    document.getElementById('reschedule-date').value = meeting.date;
+    document.getElementById('reschedule-start').value = meeting.start_time;
+    document.getElementById('reschedule-end').value = meeting.end_time;
+    document.getElementById('reschedule-modal').classList.remove('hidden');
+  }
+
+  function closeRescheduleForm() {
+    document.getElementById('reschedule-modal').classList.add('hidden');
+  }
+
+  async function submitReschedule() {
+    const id = document.getElementById('reschedule-meeting-id').value;
+    const date = document.getElementById('reschedule-date').value;
+    const start_time = document.getElementById('reschedule-start').value;
+    const end_time = document.getElementById('reschedule-end').value;
+    if (!date || !start_time || !end_time) {
+      alert('Please fill in date, start time, and end time.');
+      return;
+    }
+    try {
+      await api.rescheduleMeeting(id, { date, start_time, end_time });
+      closeRescheduleForm();
+      const [y, m] = date.split('-').map(Number);
+      calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
+      await refreshCalendarMonth();
+    } catch (err) { alert(err.message || 'Failed to reschedule meeting.'); }
   }
 
   // ── Theme ─────────────────────────────────────────────────────────────────
@@ -740,7 +1022,12 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    scheduleMeeting, cancelMeeting, respondToMeeting, saveMyEmail, toggleMeetingLocation, toggleGoogleMeetOption,
-    shiftCalendarMonth, selectCalendarDate, closeMeetingPanel
+    loadRooms, createRoom, saveRoom, deleteRoom,
+    scheduleMeeting, cancelMeeting, respondToMeeting, declineMeeting, saveMyEmail,
+    toggleMeetingLocation, toggleGoogleMeetOption,
+    toggleRecurrence, openRescheduleForm, closeRescheduleForm, submitReschedule,
+    shiftCalendarMonth, selectCalendarDate, closeMeetingPanel,
+    onMeetingSearchInput, jumpToMeetingDate,
+    showForgotPassword, showLoginFromForgot, submitForgotPassword, submitResetPassword
   };
 })();

@@ -696,7 +696,84 @@ svg { display: block; flex-shrink: 0; }
   color: var(--text-primary);
 }
 
+.meeting-search-results {
+  margin-top: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.search-result-row {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.search-result-row:hover {
+  background: var(--bg);
+}
+
+.search-result-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.search-result-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.search-result-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.room-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 /* ── Meetings ─────────────────────────────────────────────────────────────── */
+
+.form-grid-single {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 1rem;
+}
+
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.meeting-card-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.recurring-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: capitalize;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
 
 .attendees-list {
   display: flex;
@@ -1032,8 +1109,8 @@ svg { display: block; flex-shrink: 0; }
   top: 0;
   right: 0;
   bottom: 0;
-  width: 400px;
-  max-width: 90vw;
+  width: 480px;
+  max-width: 92vw;
   background: var(--surface);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
   z-index: 50;
@@ -1041,6 +1118,10 @@ svg { display: block; flex-shrink: 0; }
   flex-direction: column;
   transform: translateX(0);
   transition: transform 0.2s ease;
+}
+
+@media (min-width: 1400px) {
+  .meeting-panel { width: 520px; }
 }
 
 .meeting-panel.hidden {
@@ -1063,7 +1144,7 @@ svg { display: block; flex-shrink: 0; }
 }
 
 .meeting-panel-body {
-  padding: 1.25rem 1.5rem;
+  padding: 1.5rem 1.75rem;
   overflow-y: auto;
   flex: 1;
 }

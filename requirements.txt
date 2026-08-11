@@ -8,3 +8,5 @@ python-dotenv==1.0.1
 google-auth==2.32.0
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.140.0
+APScheduler==3.10.4
+python-multipart==0.0.9

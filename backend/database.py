@@ -57,17 +57,22 @@ def init_db():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS meetings (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                organizer_id   INTEGER NOT NULL REFERENCES users(id),
-                title          TEXT    NOT NULL,
-                description    TEXT,
-                date           TEXT    NOT NULL,
-                start_time     TEXT    NOT NULL,
-                end_time       TEXT    NOT NULL,
-                location_type  TEXT    NOT NULL DEFAULT 'online',
-                room           TEXT,
-                meeting_link   TEXT,
-                created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                organizer_id           INTEGER NOT NULL REFERENCES users(id),
+                title                  TEXT    NOT NULL,
+                description            TEXT,
+                date                   TEXT    NOT NULL,
+                start_time             TEXT    NOT NULL,
+                end_time               TEXT    NOT NULL,
+                location_type          TEXT    NOT NULL DEFAULT 'online',
+                room                   TEXT,
+                meeting_link           TEXT,
+                recurrence_rule        TEXT    NOT NULL DEFAULT 'none',
+                recurrence_until       TEXT,
+                recurrence_group_id    TEXT,
+                reminder_sent          INTEGER NOT NULL DEFAULT 0,
+                ics_sequence           INTEGER NOT NULL DEFAULT 0,
+                created_at             TEXT    NOT NULL DEFAULT (datetime('now'))
             )
         """)
         # Migration: add location_type/room/meeting_link to meetings created before these columns existed
@@ -78,6 +83,20 @@ def init_db():
             conn.execute("ALTER TABLE meetings ADD COLUMN room TEXT")
         if "meeting_link" not in meeting_cols:
             conn.execute("ALTER TABLE meetings ADD COLUMN meeting_link TEXT")
+        # Migration: recurrence + reminder tracking columns
+        if "recurrence_rule" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN recurrence_rule TEXT NOT NULL DEFAULT 'none'")
+        if "recurrence_until" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN recurrence_until TEXT")
+        if "recurrence_group_id" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN recurrence_group_id TEXT")
+        if "reminder_sent" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0")
+        # Migration: bumped on every reschedule so .ics attachments update the
+        # same calendar event in the recipient's calendar app instead of
+        # creating a duplicate
+        if "ics_sequence" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN ics_sequence INTEGER NOT NULL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS meeting_attendees (
                 meeting_id  INTEGER NOT NULL REFERENCES meetings(id),
@@ -93,6 +112,28 @@ def init_db():
             conn.execute("ALTER TABLE meeting_attendees ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
         if "rsvp_token" not in ma_cols:
             conn.execute("ALTER TABLE meeting_attendees ADD COLUMN rsvp_token TEXT")
+        if "decline_reason" not in ma_cols:
+            conn.execute("ALTER TABLE meeting_attendees ADD COLUMN decline_reason TEXT")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS rooms (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL UNIQUE,
+                capacity    INTEGER,
+                equipment   TEXT,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                token       TEXT    PRIMARY KEY,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                expires_at  TEXT    NOT NULL,
+                used        INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+
         conn.commit()
         _seed_users(conn)
 
