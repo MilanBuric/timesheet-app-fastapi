@@ -15,10 +15,24 @@ const api = (() => {
       : { 'Content-Type': 'application/json' };
   }
 
-  async function request(method, path, body = null) {
+  async function request(method, path, body = null, _isRetry = false) {
     const opts = { method, headers: authHeaders() };
     if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(path, opts);
+    let res;
+    try {
+      res = await fetch(path, opts);
+    } catch (networkErr) {
+      // fetch() throws (rather than resolving with a bad status) on a pure
+      // network-level failure — e.g. a request landing while the dev server
+      // is still finishing the previous one. Safe (GET) requests get one
+      // quiet retry before we let the error bubble up, since GETs have no
+      // side effects to worry about repeating.
+      if (method === 'GET' && !_isRetry) {
+        await new Promise(r => setTimeout(r, 400));
+        return request(method, path, body, true);
+      }
+      throw networkErr;
+    }
     if (res.status === 401) { setToken(null); window.location.reload(); return; }
     return res;
   }

@@ -7,6 +7,14 @@ DB_PATH = Path(__file__).parent / "timesheet.db"
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # WAL lets readers proceed while a write is in progress instead of
+    # blocking on SQLite's default single-writer lock — this matters once
+    # more than one person is using the app at the same time. busy_timeout
+    # makes a connection that *does* hit a lock wait and retry for up to 5s
+    # instead of immediately raising "database is locked", which covers the
+    # brief overlaps that are normal under concurrent use.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 

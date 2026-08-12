@@ -1,8 +1,28 @@
-__pycache__/
-*.pyc
+# SQLite database and its WAL/journal sidecar files — these hold live app
+# data, including stored OAuth tokens (see google_meet.py / the meetings
+# feature). Never track these; they're not source code and can leak secrets.
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Secrets / local config
 .env
-venv/
-.venv/
+.env.*
+!.env.example
 google_credentials.json
 token.json
+*.pickle
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store

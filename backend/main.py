@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Form
+from fastapi import FastAPI, HTTPException, Depends, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -773,7 +773,7 @@ def _email_invites_for_meeting(organizer, body: MeetingCreate, occurrence_date: 
 
 
 @app.post("/meetings", response_model=MeetingResponse, status_code=201)
-def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
+def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, current_user=Depends(get_current_user)):
     if body.end_time <= body.start_time:
         raise HTTPException(status_code=400, detail="End time must be after start time")
     if body.recurrence != "none" and not body.recurrence_until:
@@ -832,10 +832,16 @@ def create_meeting(body: MeetingCreate, current_user=Depends(get_current_user)):
 
         result = _meeting_with_attendees(conn, created_ids[0][0])
 
-    # Send invite emails after the transaction commits; never let a failed
-    # email prevent the meeting(s) from being created.
+    # Emails (including SMTP round-trips and, for recurring series, one send
+    # per occurrence) are queued to run *after* the response goes out — this
+    # is what makes creating a recurring meeting with several attendees feel
+    # instant instead of blocking the request for several seconds, which was
+    # making the very next fetch (the calendar refresh) race a still-busy
+    # server and occasionally fail with "Failed to fetch".
     for meeting_id, occurrence_date, invitees in created_ids:
-        _email_invites_for_meeting(current_user, body, occurrence_date, room, meeting_link, invitees, meeting_id)
+        background_tasks.add_task(
+            _email_invites_for_meeting, current_user, body, occurrence_date, room, meeting_link, invitees, meeting_id
+        )
 
     result["series_count"] = len(created_ids) if recurrence_group_id else None
     result["skipped_dates"] = skipped_dates or None
@@ -871,8 +877,57 @@ def delete_meeting_series(group_id: str, current_user=Depends(get_current_user))
         conn.commit()
 
 
+def _email_reschedule_notices(m, organizer, body: MeetingReschedule, old_date, old_start, old_end,
+                               new_sequence: int, meeting_id: int, invitees: list) -> None:
+    all_guest_names = [inv["username"] for inv in invitees]
+    all_guest_emails = [inv["email"] for inv in invitees if inv.get("email")]
+    for invitee in invitees:
+        if invitee.get("email"):
+            try:
+                email_utils.send_meeting_reschedule_notice(
+                    to_email=invitee["email"],
+                    attendee_name=invitee["username"],
+                    organizer_name=organizer["username"] if organizer else "",
+                    title=m["title"],
+                    date=body.date,
+                    start_time=body.start_time,
+                    end_time=body.end_time,
+                    description=m["description"],
+                    rsvp_token=invitee["rsvp_token"],
+                    old_date=old_date, old_start_time=old_start, old_end_time=old_end,
+                    location_type=m["location_type"],
+                    room=m["room"],
+                    meeting_link=m["meeting_link"],
+                    guests=all_guest_names,
+                    meeting_id=meeting_id,
+                    sequence=new_sequence,
+                    organizer_email=(organizer["email"] if organizer else None),
+                    attendee_emails=all_guest_emails
+                )
+            except Exception as exc:
+                print(f"❌ Failed to email {invitee['email']}: {exc}")
+
+    if organizer and organizer["email"]:
+        try:
+            email_utils.send_organizer_confirmation(
+                to_email=organizer["email"],
+                organizer_name=organizer["username"],
+                title=m["title"],
+                date=body.date,
+                start_time=body.start_time,
+                end_time=body.end_time,
+                description=m["description"],
+                location_type=m["location_type"],
+                room=m["room"],
+                meeting_link=m["meeting_link"],
+                guests=all_guest_names
+            )
+        except Exception as exc:
+            print(f"❌ Failed to email organizer {organizer['email']}: {exc}")
+
+
 @app.patch("/meetings/{meeting_id}/reschedule", response_model=MeetingResponse)
-def reschedule_meeting(meeting_id: int, body: MeetingReschedule, current_user=Depends(get_current_user)):
+def reschedule_meeting(meeting_id: int, body: MeetingReschedule, background_tasks: BackgroundTasks, current_user=Depends(get_current_user)):
     if body.end_time <= body.start_time:
         raise HTTPException(status_code=400, detail="End time must be after start time")
 
@@ -919,51 +974,12 @@ def reschedule_meeting(meeting_id: int, body: MeetingReschedule, current_user=De
             (meeting_id,)
         ).fetchall()]
 
-    all_guest_names = [inv["username"] for inv in invitees]
-    all_guest_emails = [inv["email"] for inv in invitees if inv.get("email")]
-    for invitee in invitees:
-        if invitee.get("email"):
-            try:
-                email_utils.send_meeting_reschedule_notice(
-                    to_email=invitee["email"],
-                    attendee_name=invitee["username"],
-                    organizer_name=organizer["username"] if organizer else "",
-                    title=m["title"],
-                    date=body.date,
-                    start_time=body.start_time,
-                    end_time=body.end_time,
-                    description=m["description"],
-                    rsvp_token=invitee["rsvp_token"],
-                    old_date=old_date, old_start_time=old_start, old_end_time=old_end,
-                    location_type=m["location_type"],
-                    room=m["room"],
-                    meeting_link=m["meeting_link"],
-                    guests=all_guest_names,
-                    meeting_id=meeting_id,
-                    sequence=new_sequence,
-                    organizer_email=(organizer["email"] if organizer else None),
-                    attendee_emails=all_guest_emails
-                )
-            except Exception as exc:
-                print(f"❌ Failed to email {invitee['email']}: {exc}")
-
-    if organizer and organizer["email"]:
-        try:
-            email_utils.send_organizer_confirmation(
-                to_email=organizer["email"],
-                organizer_name=organizer["username"],
-                title=m["title"],
-                date=body.date,
-                start_time=body.start_time,
-                end_time=body.end_time,
-                description=m["description"],
-                location_type=m["location_type"],
-                room=m["room"],
-                meeting_link=m["meeting_link"],
-                guests=all_guest_names
-            )
-        except Exception as exc:
-            print(f"❌ Failed to email organizer {organizer['email']}: {exc}")
+    # Emails are queued to run after the response is sent — see the comment
+    # in create_meeting for why this matters for the frontend's UX.
+    background_tasks.add_task(
+        _email_reschedule_notices, m, organizer, body, old_date, old_start, old_end,
+        new_sequence, meeting_id, invitees
+    )
 
     return result
 

@@ -9,6 +9,9 @@ const app = (() => {
   let monthMeetings = [];
   let roomsList = [];
   let meetingSearchDebounce = null;
+  let meetingsPollTimer = null;
+  let meetingsViewActive = false;
+  const MEETINGS_POLL_MS = 20000;
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
@@ -55,6 +58,8 @@ const app = (() => {
   }
 
   function handleLogout() {
+    stopMeetingsPolling();
+    meetingsViewActive = false;
     api.logout();
     currentUser = null;
     showLogin();
@@ -154,10 +159,30 @@ const app = (() => {
         document.getElementById('view-title').textContent = titles[view];
         if (view === 'entries') quickFilter('week');
         if (view === 'report') { reportOffset = 0; renderReport(); }
-        if (view === 'meetings') loadMeetingsView();
+        meetingsViewActive = (view === 'meetings');
+        if (view === 'meetings') { loadMeetingsView(); startMeetingsPolling(); }
+        else { stopMeetingsPolling(); }
         if (view === 'users') { loadUsers(); loadRooms(); }
       });
     });
+    // A colleague's RSVP (from the emailed link, or another session) doesn't
+    // reach this tab on its own — periodic polling plus an immediate refresh
+    // when the tab regains focus is what actually keeps "Pending" from
+    // sitting stale until a manual reload.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && meetingsViewActive) refreshCalendarResilient();
+    });
+  }
+
+  function startMeetingsPolling() {
+    stopMeetingsPolling();
+    meetingsPollTimer = setInterval(() => {
+      if (!document.hidden) refreshCalendarResilient();
+    }, MEETINGS_POLL_MS);
+  }
+
+  function stopMeetingsPolling() {
+    if (meetingsPollTimer) { clearInterval(meetingsPollTimer); meetingsPollTimer = null; }
   }
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -804,6 +829,11 @@ const app = (() => {
     meetings.renderCalendar(calendarYear, calendarMonth, monthMeetings, selectedCalendarDate, today());
     renderSidebarForSelectedDate();
     openMeetingPanel();
+    // Fire-and-forget: instant render from cache above keeps this snappy,
+    // then this quietly picks up any RSVP made outside this tab (an
+    // attendee replying from the emailed link, or another browser session)
+    // and re-renders once it lands.
+    refreshCalendarResilient();
   }
 
   function onMeetingSearchInput(value) {
@@ -829,7 +859,7 @@ const app = (() => {
     document.getElementById('meeting-search-results').classList.add('hidden');
     const [y, m] = dateStr.split('-').map(Number);
     calendarYear = y; calendarMonth = m - 1;
-    await refreshCalendarMonth();
+    await refreshCalendarResilient();
     selectCalendarDate(dateStr);
   }
 
@@ -847,8 +877,8 @@ const app = (() => {
   async function respondToMeeting(id, status) {
     try {
       await api.rsvpMeeting(id, status);
-      await refreshCalendarMonth();
-    } catch { alert('Failed to respond to meeting.'); }
+    } catch { alert('Failed to respond to meeting.'); return; }
+    await refreshCalendarResilient();
   }
 
   async function declineMeeting(id) {
@@ -856,8 +886,8 @@ const app = (() => {
     if (reason === null) return; // cancelled the prompt
     try {
       await api.rsvpMeeting(id, 'declined', reason.trim() || null);
-      await refreshCalendarMonth();
-    } catch { alert('Failed to respond to meeting.'); }
+    } catch { alert('Failed to respond to meeting.'); return; }
+    await refreshCalendarResilient();
   }
 
   function toggleMeetingLocation() {
@@ -903,8 +933,9 @@ const app = (() => {
       alert('Please choose an end date for the recurring series.');
       return;
     }
+    let result;
     try {
-      const result = await api.createMeeting({
+      result = await api.createMeeting({
         title, date, start_time, end_time, description: description || null, attendee_ids,
         location_type,
         room: location_type === 'in_person' ? room : null,
@@ -912,29 +943,52 @@ const app = (() => {
         use_google_meet: location_type === 'online' ? use_google_meet : false,
         recurrence, recurrence_until: recurrence !== 'none' ? recurrence_until : null
       });
-      document.getElementById('meeting-title').value = '';
-      document.getElementById('meeting-description').value = '';
-      document.getElementById('meeting-room').value = '';
-      document.getElementById('meeting-link').value = '';
-      document.getElementById('meeting-use-google-meet').checked = false;
-      document.getElementById('meeting-recurrence').value = 'none';
-      document.getElementById('meeting-recurrence-until').value = '';
-      toggleGoogleMeetOption();
-      toggleRecurrence();
-      meetings.clearAttendeeSelection();
-      // Jump the calendar to the newly-scheduled date so the new meeting
-      // is immediately visible, even if it's in a different month.
-      const [y, m] = date.split('-').map(Number);
-      calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
-      await refreshCalendarMonth();
-      if (result.series_count) {
-        let msg = `Scheduled ${result.series_count} occurrences.`;
-        if (result.skipped_dates && result.skipped_dates.length) {
-          msg += `\n\nSkipped (room already booked): ${result.skipped_dates.join(', ')}`;
-        }
-        alert(msg);
+    } catch (err) {
+      alert(err.message || 'Failed to schedule meeting.');
+      return;
+    }
+
+    // The meeting is saved at this point — everything from here on is just
+    // refreshing the view, so a hiccup here must never look like the
+    // scheduling itself failed.
+    document.getElementById('meeting-title').value = '';
+    document.getElementById('meeting-description').value = '';
+    document.getElementById('meeting-room').value = '';
+    document.getElementById('meeting-link').value = '';
+    document.getElementById('meeting-use-google-meet').checked = false;
+    document.getElementById('meeting-recurrence').value = 'none';
+    document.getElementById('meeting-recurrence-until').value = '';
+    toggleGoogleMeetOption();
+    toggleRecurrence();
+    meetings.clearAttendeeSelection();
+    // Jump the calendar to the newly-scheduled date so the new meeting
+    // is immediately visible, even if it's in a different month.
+    const [y, m] = date.split('-').map(Number);
+    calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
+    await refreshCalendarResilient();
+    if (result.series_count) {
+      let msg = `Scheduled ${result.series_count} occurrences.`;
+      if (result.skipped_dates && result.skipped_dates.length) {
+        msg += `\n\nSkipped (room already booked): ${result.skipped_dates.join(', ')}`;
       }
-    } catch (err) { alert(err.message || 'Failed to schedule meeting.'); }
+      alert(msg);
+    }
+  }
+
+  // Wraps refreshCalendarMonth() with one quiet retry so a transient network
+  // hiccup right after a create/reschedule/cancel doesn't leave the calendar
+  // stale until the user manually reloads the page.
+  async function refreshCalendarResilient() {
+    try {
+      await refreshCalendarMonth();
+    } catch {
+      await new Promise(r => setTimeout(r, 600));
+      try {
+        await refreshCalendarMonth();
+      } catch {
+        console.warn('Could not refresh the calendar automatically — it will catch up on the next action.');
+      }
+    }
   }
 
   async function cancelMeeting(id, groupId) {
@@ -951,8 +1005,8 @@ const app = (() => {
         if (!confirm('Cancel this meeting?')) return;
         await api.deleteMeeting(id);
       }
-      await refreshCalendarMonth();
-    } catch { alert('Failed to cancel meeting.'); }
+    } catch { alert('Failed to cancel meeting.'); return; }
+    await refreshCalendarResilient();
   }
 
   // ── Reschedule ────────────────────────────────────────────────────────────
@@ -983,11 +1037,11 @@ const app = (() => {
     }
     try {
       await api.rescheduleMeeting(id, { date, start_time, end_time });
-      closeRescheduleForm();
-      const [y, m] = date.split('-').map(Number);
-      calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
-      await refreshCalendarMonth();
-    } catch (err) { alert(err.message || 'Failed to reschedule meeting.'); }
+    } catch (err) { alert(err.message || 'Failed to reschedule meeting.'); return; }
+    closeRescheduleForm();
+    const [y, m] = date.split('-').map(Number);
+    calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
+    await refreshCalendarResilient();
   }
 
   // ── Theme ─────────────────────────────────────────────────────────────────
