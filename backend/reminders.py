@@ -1,10 +1,14 @@
 """
-Background reminder emails, sent shortly before a meeting starts.
+Background reminder emails, sent 15 minutes before a meeting starts.
 
 Runs on a simple polling loop via APScheduler rather than scheduling one
 job per meeting — much simpler to reason about, survives server restarts
 without any extra bookkeeping, and the `reminder_sent` flag on the meeting
 row prevents duplicate sends across polls.
+
+Precision: since this polls once a minute, a reminder fires the moment a
+meeting first falls within the 15-minute window — in practice that means
+somewhere between 14 and 15 minutes before start, never later than 15.
 
 Caveat: times are compared using the server's local naive time, same
 simplification the rest of this app already makes (see /stats' client_date
@@ -16,8 +20,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from database import get_connection
 import email_utils
 
-REMINDER_WINDOW_MINUTES = 30
-POLL_INTERVAL_MINUTES = 5
+REMINDER_WINDOW_MINUTES = 15
+POLL_INTERVAL_MINUTES = 1
 
 _scheduler = None
 

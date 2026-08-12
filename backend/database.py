@@ -129,9 +129,13 @@ def init_db():
                 name        TEXT    NOT NULL UNIQUE,
                 capacity    INTEGER,
                 equipment   TEXT,
+                status      TEXT    NOT NULL DEFAULT 'operational',
                 created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
             )
         """)
+        room_cols = [r["name"] for r in conn.execute("PRAGMA table_info(rooms)").fetchall()]
+        if "status" not in room_cols:
+            conn.execute("ALTER TABLE rooms ADD COLUMN status TEXT NOT NULL DEFAULT 'operational'")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS password_reset_tokens (

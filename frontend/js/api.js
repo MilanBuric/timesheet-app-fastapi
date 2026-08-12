@@ -196,6 +196,12 @@ const api = (() => {
     if (!res.ok) throw new Error('Failed to delete room');
   }
 
+  async function getRoomOccupancy(id) {
+    const res = await request('GET', `/rooms/${id}/occupancy`);
+    if (!res.ok) throw new Error('Failed to fetch room schedule');
+    return res.json();
+  }
+
   async function forgotPassword(username) {
     const res = await fetch('/auth/forgot-password', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -264,7 +270,7 @@ const api = (() => {
     clockIn, clockOut, getActiveSession,
     getBasicUsers, getMeetings, createMeeting, deleteMeeting, deleteMeetingSeries,
     rescheduleMeeting, rsvpMeeting, updateMyEmail,
-    getRooms, createRoom, updateRoom, deleteRoom,
+    getRooms, createRoom, updateRoom, deleteRoom, getRoomOccupancy,
     forgotPassword, resetPassword
   };
 })();

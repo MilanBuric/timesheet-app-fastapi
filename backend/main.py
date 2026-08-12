@@ -12,7 +12,7 @@ from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     CreateUserRequest, WeeklyReport, WeeklyReportDay, RejectRequest,
                     BasicUser, MeetingCreate, MeetingResponse, UpdateEmailRequest,
                     RSVPRequest, MeetingReschedule, RoomCreate, RoomUpdate, RoomResponse,
-                    ForgotPasswordRequest, ResetPasswordRequest)
+                    RoomOccupancySlot, ForgotPasswordRequest, ResetPasswordRequest)
 from auth import verify_password, create_token, get_current_user, require_manager
 import email_utils
 import google_meet
@@ -569,8 +569,8 @@ def create_room(body: RoomCreate, current_user=Depends(require_manager)):
         if existing:
             raise HTTPException(status_code=409, detail=f"A room named \"{body.name}\" already exists")
         cursor = conn.execute(
-            "INSERT INTO rooms (name, capacity, equipment) VALUES (?, ?, ?)",
-            (body.name, body.capacity, body.equipment)
+            "INSERT INTO rooms (name, capacity, equipment, status) VALUES (?, ?, ?, ?)",
+            (body.name, body.capacity, body.equipment, body.status)
         )
         conn.commit()
         return dict(conn.execute("SELECT * FROM rooms WHERE id = ?", (cursor.lastrowid,)).fetchone())
@@ -585,9 +585,10 @@ def update_room(room_id: int, body: RoomUpdate, current_user=Depends(require_man
         name = body.name if body.name is not None else room["name"]
         capacity = body.capacity if body.capacity is not None else room["capacity"]
         equipment = body.equipment if body.equipment is not None else room["equipment"]
+        status = body.status if body.status is not None else room["status"]
         conn.execute(
-            "UPDATE rooms SET name = ?, capacity = ?, equipment = ? WHERE id = ?",
-            (name, capacity, equipment, room_id)
+            "UPDATE rooms SET name = ?, capacity = ?, equipment = ?, status = ? WHERE id = ?",
+            (name, capacity, equipment, status, room_id)
         )
         conn.commit()
         return dict(conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone())
@@ -598,6 +599,30 @@ def delete_room(room_id: int, current_user=Depends(require_manager)):
     with get_connection() as conn:
         conn.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
         conn.commit()
+
+
+@app.get("/rooms/{room_id}/occupancy", response_model=list[RoomOccupancySlot])
+def get_room_occupancy(room_id: int, date_from: str = None, date_to: str = None,
+                        current_user=Depends(get_current_user)):
+    """The from/to time period each existing booking occupies this room for,
+    so a manager can see at a glance when a room is actually free. Defaults
+    to today through 30 days out when no range is given."""
+    with get_connection() as conn:
+        room = conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        if not date_from:
+            date_from = date.today().isoformat()
+        if not date_to:
+            date_to = (date.today() + timedelta(days=30)).isoformat()
+        rows = conn.execute(
+            """SELECT m.id as meeting_id, m.title, m.date, m.start_time, m.end_time, u.username as organizer_username
+               FROM meetings m JOIN users u ON m.organizer_id = u.id
+               WHERE m.location_type = 'in_person' AND m.room = ? AND m.date >= ? AND m.date <= ?
+               ORDER BY m.date, m.start_time""",
+            (room["name"], date_from, date_to)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def _meeting_with_attendees(conn, meeting_id: int):
@@ -814,6 +839,13 @@ def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, curre
     created_ids = []
     skipped_dates = []
     with get_connection() as conn:
+        if room:
+            room_row = conn.execute("SELECT status FROM rooms WHERE name = ?", (room,)).fetchone()
+            if room_row and room_row["status"] == "renovation":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Room \"{room}\" is currently under renovation and can't be booked"
+                )
         for occurrence_date in occurrence_dates:
             meeting_id, invitees = _create_one_meeting(
                 conn, current_user, body, occurrence_date, room, meeting_link, recurrence_group_id

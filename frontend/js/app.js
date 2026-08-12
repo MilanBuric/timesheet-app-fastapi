@@ -661,7 +661,7 @@ const app = (() => {
       container.innerHTML = `
         <div class="create-user-form">
           <h3 style="font-size:14px;font-weight:500;margin-bottom:12px;">Add a room</h3>
-          <div style="display:grid;grid-template-columns:1.5fr 0.8fr 2fr auto;gap:10px;align-items:end;">
+          <div style="display:grid;grid-template-columns:1.3fr 0.7fr 1.7fr 1fr auto;gap:10px;align-items:end;">
             <div class="form-group">
               <label for="new-room-name">Name</label>
               <input type="text" id="new-room-name" placeholder="e.g. Conference Room B" />
@@ -674,6 +674,13 @@ const app = (() => {
               <label for="new-room-equipment">Equipment</label>
               <input type="text" id="new-room-equipment" placeholder="e.g. Projector, Whiteboard" />
             </div>
+            <div class="form-group">
+              <label for="new-room-status">Status</label>
+              <select id="new-room-status">
+                <option value="operational">Operational</option>
+                <option value="renovation">Under renovation</option>
+              </select>
+            </div>
             <button class="btn btn-primary" onclick="app.createRoom()" style="height:38px;">Add</button>
           </div>
           <p id="create-room-error" style="font-size:13px;color:var(--danger);margin-top:8px;min-height:18px;"></p>
@@ -684,20 +691,27 @@ const app = (() => {
               <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Room</th>
               <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Capacity</th>
               <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Equipment</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Status</th>
               <th style="border-bottom:1px solid var(--border);"></th>
             </tr>
           </thead>
           <tbody>
             ${rooms.length ? rooms.map(r => `
               <tr>
-                <td style="padding:12px 0;border-bottom:1px solid var(--border);">${r.name}</td>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);">${escapeAttr(r.name)}</td>
                 <td style="padding:12px 0;border-bottom:1px solid var(--border);">
                   <input type="number" id="room-capacity-${r.id}" value="${r.capacity ?? ''}" min="1"
                     style="width:70px;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;" />
                 </td>
                 <td style="padding:12px 0;border-bottom:1px solid var(--border);">
-                  <input type="text" id="room-equipment-${r.id}" value="${r.equipment ? r.equipment.replace(/"/g, '&quot;') : ''}"
+                  <input type="text" id="room-equipment-${r.id}" value="${r.equipment ? escapeAttr(r.equipment) : ''}"
                     style="width:100%;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;" />
+                </td>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);">
+                  <select id="room-status-${r.id}" style="height:32px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;">
+                    <option value="operational"${r.status === 'operational' ? ' selected' : ''}>Operational</option>
+                    <option value="renovation"${r.status === 'renovation' ? ' selected' : ''}>Under renovation</option>
+                  </select>
                 </td>
                 <td style="padding:12px 0;border-bottom:1px solid var(--border);text-align:right;">
                   <div style="display:flex;gap:6px;justify-content:flex-end;">
@@ -708,21 +722,60 @@ const app = (() => {
                   </div>
                 </td>
               </tr>
-            `).join('') : `<tr><td colspan="4" style="padding:12px 0;color:var(--text-muted);">No rooms configured yet.</td></tr>`}
+            `).join('') : `<tr><td colspan="5" style="padding:12px 0;color:var(--text-muted);">No rooms configured yet.</td></tr>`}
           </tbody>
-        </table>`;
+        </table>
+        ${rooms.length ? `
+        <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">
+          <h3 style="font-size:14px;font-weight:500;margin-bottom:12px;">Room schedule</h3>
+          <p class="card-subtitle" style="margin-bottom:10px;">See the from/to time period each upcoming booking occupies a room, so you can spot when it's actually free (next 30 days).</p>
+          <div class="form-group" style="max-width:280px;">
+            <label for="room-schedule-select">Room</label>
+            <select id="room-schedule-select" onchange="app.loadRoomOccupancy(this.value)">
+              <option value="">Select a room…</option>
+              ${rooms.map(r => `<option value="${r.id}">${escapeAttr(r.name)}${r.status === 'renovation' ? ' (under renovation)' : ''}</option>`).join('')}
+            </select>
+          </div>
+          <div id="room-occupancy-list" style="margin-top:12px;"></div>
+        </div>` : ''}`;
     } catch { alert('Failed to load rooms.'); }
+  }
+
+  async function loadRoomOccupancy(roomId) {
+    const listEl = document.getElementById('room-occupancy-list');
+    if (!roomId) { listEl.innerHTML = ''; return; }
+    listEl.innerHTML = `<p class="card-subtitle">Loading…</p>`;
+    try {
+      const slots = await api.getRoomOccupancy(roomId);
+      if (!slots.length) {
+        listEl.innerHTML = `<p class="card-subtitle">No bookings in the next 30 days — this room is fully free.</p>`;
+        return;
+      }
+      listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tbody>
+          ${slots.map(s => `
+            <tr>
+              <td style="padding:6px 10px 6px 0;color:var(--text-muted);white-space:nowrap;">${s.date}</td>
+              <td style="padding:6px 10px 6px 0;white-space:nowrap;">${s.start_time} – ${s.end_time}</td>
+              <td style="padding:6px 0;">${escapeAttr(s.title)}</td>
+              <td style="padding:6px 0;color:var(--text-muted);">by ${escapeAttr(s.organizer_username)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+    } catch { listEl.innerHTML = `<p class="card-subtitle" style="color:var(--danger);">Failed to load this room's schedule.</p>`; }
   }
 
   async function createRoom() {
     const name = document.getElementById('new-room-name').value.trim();
     const capacityRaw = document.getElementById('new-room-capacity').value;
     const equipment = document.getElementById('new-room-equipment').value.trim();
+    const status = document.getElementById('new-room-status').value;
     const errEl = document.getElementById('create-room-error');
     errEl.textContent = '';
     if (!name) { errEl.textContent = 'Please enter a room name.'; return; }
     try {
-      await api.createRoom({ name, capacity: capacityRaw ? parseInt(capacityRaw, 10) : null, equipment: equipment || null });
+      await api.createRoom({ name, capacity: capacityRaw ? parseInt(capacityRaw, 10) : null, equipment: equipment || null, status });
       document.getElementById('new-room-name').value = '';
       document.getElementById('new-room-capacity').value = '';
       document.getElementById('new-room-equipment').value = '';
@@ -733,8 +786,9 @@ const app = (() => {
   async function saveRoom(roomId) {
     const capacityRaw = document.getElementById(`room-capacity-${roomId}`).value;
     const equipment = document.getElementById(`room-equipment-${roomId}`).value.trim();
+    const status = document.getElementById(`room-status-${roomId}`).value;
     try {
-      await api.updateRoom(roomId, { capacity: capacityRaw ? parseInt(capacityRaw, 10) : null, equipment: equipment || null });
+      await api.updateRoom(roomId, { capacity: capacityRaw ? parseInt(capacityRaw, 10) : null, equipment: equipment || null, status });
       await loadRooms();
     } catch { alert('Failed to update room.'); }
   }
@@ -784,7 +838,7 @@ const app = (() => {
   function populateRoomOptions() {
     const datalist = document.getElementById('room-options');
     if (!datalist) return;
-    datalist.innerHTML = roomsList.map(r => {
+    datalist.innerHTML = roomsList.filter(r => r.status !== 'renovation').map(r => {
       const label = [r.capacity ? `${r.capacity} seats` : null, r.equipment || null].filter(Boolean).join(' · ');
       return `<option value="${escapeAttr(r.name)}"${label ? ` label="${escapeAttr(label)}"` : ''}></option>`;
     }).join('');
@@ -1076,7 +1130,7 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    loadRooms, createRoom, saveRoom, deleteRoom,
+    loadRooms, createRoom, saveRoom, deleteRoom, loadRoomOccupancy,
     scheduleMeeting, cancelMeeting, respondToMeeting, declineMeeting, saveMyEmail,
     toggleMeetingLocation, toggleGoogleMeetOption,
     toggleRecurrence, openRescheduleForm, closeRescheduleForm, submitReschedule,

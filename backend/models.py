@@ -134,12 +134,14 @@ class RoomCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     capacity: Optional[int] = Field(None, ge=1)
     equipment: Optional[str] = Field(None, max_length=300)
+    status: str = Field("operational", pattern="^(operational|renovation)$")
 
 
 class RoomUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     capacity: Optional[int] = Field(None, ge=1)
     equipment: Optional[str] = Field(None, max_length=300)
+    status: Optional[str] = Field(None, pattern="^(operational|renovation)$")
 
 
 class RoomResponse(BaseModel):
@@ -147,6 +149,16 @@ class RoomResponse(BaseModel):
     name: str
     capacity: Optional[int] = None
     equipment: Optional[str] = None
+    status: str = "operational"
+
+
+class RoomOccupancySlot(BaseModel):
+    meeting_id: int
+    title: str
+    date: str
+    start_time: str
+    end_time: str
+    organizer_username: str
 
 
 class ForgotPasswordRequest(BaseModel):
