@@ -725,45 +725,8 @@ const app = (() => {
             `).join('') : `<tr><td colspan="5" style="padding:12px 0;color:var(--text-muted);">No rooms configured yet.</td></tr>`}
           </tbody>
         </table>
-        ${rooms.length ? `
-        <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">
-          <h3 style="font-size:14px;font-weight:500;margin-bottom:12px;">Room schedule</h3>
-          <p class="card-subtitle" style="margin-bottom:10px;">See the from/to time period each upcoming booking occupies a room, so you can spot when it's actually free (next 30 days).</p>
-          <div class="form-group" style="max-width:280px;">
-            <label for="room-schedule-select">Room</label>
-            <select id="room-schedule-select" onchange="app.loadRoomOccupancy(this.value)">
-              <option value="">Select a room…</option>
-              ${rooms.map(r => `<option value="${r.id}">${escapeAttr(r.name)}${r.status === 'renovation' ? ' (under renovation)' : ''}</option>`).join('')}
-            </select>
-          </div>
-          <div id="room-occupancy-list" style="margin-top:12px;"></div>
-        </div>` : ''}`;
+        ${rooms.length ? `<p class="card-subtitle" style="margin-top:14px;">Want to check when a room's actually free? The Meetings tab now has a Room availability lookup for that — visible to everyone, not just managers here.</p>` : ''}`;
     } catch { alert('Failed to load rooms.'); }
-  }
-
-  async function loadRoomOccupancy(roomId) {
-    const listEl = document.getElementById('room-occupancy-list');
-    if (!roomId) { listEl.innerHTML = ''; return; }
-    listEl.innerHTML = `<p class="card-subtitle">Loading…</p>`;
-    try {
-      const slots = await api.getRoomOccupancy(roomId);
-      if (!slots.length) {
-        listEl.innerHTML = `<p class="card-subtitle">No bookings in the next 30 days — this room is fully free.</p>`;
-        return;
-      }
-      listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <tbody>
-          ${slots.map(s => `
-            <tr>
-              <td style="padding:6px 10px 6px 0;color:var(--text-muted);white-space:nowrap;">${s.date}</td>
-              <td style="padding:6px 10px 6px 0;white-space:nowrap;">${s.start_time} – ${s.end_time}</td>
-              <td style="padding:6px 0;">${escapeAttr(s.title)}</td>
-              <td style="padding:6px 0;color:var(--text-muted);">by ${escapeAttr(s.organizer_username)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>`;
-    } catch { listEl.innerHTML = `<p class="card-subtitle" style="color:var(--danger);">Failed to load this room's schedule.</p>`; }
   }
 
   async function createRoom() {
@@ -823,6 +786,7 @@ const app = (() => {
       roomsList = rooms;
       meetings.setRooms(rooms);
       populateRoomOptions();
+      populateAvailabilityRoomSelect();
       const emailInput = document.getElementById('my-email');
       if (emailInput && document.activeElement !== emailInput) {
         emailInput.value = currentUser.email || '';
@@ -844,6 +808,42 @@ const app = (() => {
     }).join('');
   }
 
+  function populateAvailabilityRoomSelect() {
+    const select = document.getElementById('availability-room-select');
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = `<option value="">Select a room…</option>` + roomsList.map(r =>
+      `<option value="${r.id}">${escapeAttr(r.name)}${r.status === 'renovation' ? ' (under renovation)' : ''}</option>`
+    ).join('');
+    if (previous && roomsList.some(r => String(r.id) === previous)) select.value = previous;
+  }
+
+  async function loadMeetingsRoomAvailability(roomId) {
+    const listEl = document.getElementById('meetings-room-occupancy-list');
+    if (!listEl) return;
+    if (!roomId) { listEl.innerHTML = ''; return; }
+    listEl.innerHTML = `<p class="card-subtitle">Loading…</p>`;
+    try {
+      const slots = await api.getRoomOccupancy(roomId);
+      if (!slots.length) {
+        listEl.innerHTML = `<p class="card-subtitle">No bookings in the next 30 days — this room is fully free.</p>`;
+        return;
+      }
+      listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tbody>
+          ${slots.map(s => `
+            <tr>
+              <td style="padding:6px 10px 6px 0;color:var(--text-muted);white-space:nowrap;">${s.date}</td>
+              <td style="padding:6px 10px 6px 0;white-space:nowrap;">${s.start_time} – ${s.end_time}</td>
+              <td style="padding:6px 0;">${escapeAttr(s.title)}</td>
+              <td style="padding:6px 0;color:var(--text-muted);">by ${escapeAttr(s.organizer_username)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+    } catch { listEl.innerHTML = `<p class="card-subtitle" style="color:var(--danger);">Failed to load this room's schedule.</p>`; }
+  }
+
   async function refreshCalendarMonth() {
     const { from, to } = monthRange(calendarYear, calendarMonth);
     monthMeetings = await api.getMeetings({ date_from: from, date_to: to });
@@ -857,6 +857,29 @@ const app = (() => {
     document.getElementById('sidebar-date-label').textContent = label;
     document.getElementById('meeting-date').value = selectedCalendarDate;
     meetings.renderList(dayMeetings, currentUser);
+    renderRoomsBookedToday(dayMeetings);
+  }
+
+  function renderRoomsBookedToday(dayMeetings) {
+    const el = document.getElementById('rooms-booked-today');
+    if (!el) return;
+    const booked = dayMeetings
+      .filter(m => m.location_type === 'in_person' && m.room)
+      .sort((a, b) => a.room.localeCompare(b.room) || a.start_time.localeCompare(b.start_time));
+    if (!booked.length) {
+      el.innerHTML = `<p class="card-subtitle" style="margin-bottom:14px;">No rooms booked on this date.</p>`;
+      return;
+    }
+    el.innerHTML = `
+      <div style="margin-bottom:14px;">
+        <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:8px;">Rooms booked on this date</h3>
+        ${booked.map(m => `
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;">
+            <span>📍 ${escapeAttr(m.room)}</span>
+            <span style="color:var(--text-muted);">${m.start_time} – ${m.end_time}</span>
+          </div>
+        `).join('')}
+      </div>`;
   }
 
   function openMeetingPanel() {
@@ -1130,7 +1153,7 @@ const app = (() => {
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveRate,
-    loadRooms, createRoom, saveRoom, deleteRoom, loadRoomOccupancy,
+    loadRooms, createRoom, saveRoom, deleteRoom, loadMeetingsRoomAvailability,
     scheduleMeeting, cancelMeeting, respondToMeeting, declineMeeting, saveMyEmail,
     toggleMeetingLocation, toggleGoogleMeetOption,
     toggleRecurrence, openRescheduleForm, closeRescheduleForm, submitReschedule,

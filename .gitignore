@@ -13,6 +13,7 @@
 google_credentials.json
 token.json
 *.pickle
+cloudflared.exe
 
 # Python
 __pycache__/

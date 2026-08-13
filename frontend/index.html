@@ -284,6 +284,18 @@
           <div id="meeting-search-results" class="meeting-search-results hidden"></div>
         </div>
 
+        <div class="card">
+          <h2 class="card-title">Room availability</h2>
+          <p class="card-subtitle">Check when a room is free before you schedule — visible to everyone, not just managers.</p>
+          <div class="form-group" style="margin-bottom:12px;max-width:320px;">
+            <label for="availability-room-select">Room</label>
+            <select id="availability-room-select" onchange="app.loadMeetingsRoomAvailability(this.value)">
+              <option value="">Select a room…</option>
+            </select>
+          </div>
+          <div id="meetings-room-occupancy-list"></div>
+        </div>
+
         <div class="card calendar-card" id="meetings-calendar-card">
           <div class="calendar-header">
             <button class="btn-icon" onclick="app.shiftCalendarMonth(-1)" title="Previous month">
@@ -309,6 +321,7 @@
             </button>
           </div>
           <div class="meeting-panel-body">
+            <div id="rooms-booked-today"></div>
             <div id="sidebar-meetings-list"></div>
 
             <div class="panel-divider"></div>

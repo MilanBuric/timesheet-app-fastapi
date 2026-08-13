@@ -10,3 +10,7 @@ google-auth-oauthlib==1.2.1
 google-api-python-client==2.140.0
 APScheduler==3.10.4
 python-multipart==0.0.9
+
+# Only used by start_with_ngrok.py, for testing with people outside your
+# network. Harmless to have installed even when you're not using it.
+pyngrok==7.2.0
