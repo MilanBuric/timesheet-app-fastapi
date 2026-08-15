@@ -12,11 +12,14 @@ from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     CreateUserRequest, WeeklyReport, WeeklyReportDay, RejectRequest,
                     BasicUser, MeetingCreate, MeetingResponse, UpdateEmailRequest,
                     RSVPRequest, MeetingReschedule, RoomCreate, RoomUpdate, RoomResponse,
-                    RoomOccupancySlot, ForgotPasswordRequest, ResetPasswordRequest)
+                    RoomOccupancySlot, ForgotPasswordRequest, ResetPasswordRequest,
+                    ClockSessionResponse, ClockSessionUpdate, UpdateUserProfileRequest,
+                    TeamCreate, TeamUpdate, TeamResponse)
 from auth import verify_password, create_token, get_current_user, require_manager
 import email_utils
 import google_meet
 import reminders
+import clock_auto_close
 
 app = FastAPI(title="Timesheet API")
 
@@ -34,11 +37,13 @@ FRONTEND_PATH = Path(__file__).parent.parent / "frontend"
 def startup():
     init_db()
     reminders.start_scheduler()
+    clock_auto_close.start_scheduler()
 
 
 @app.on_event("shutdown")
 def shutdown():
     reminders.stop_scheduler()
+    clock_auto_close.stop_scheduler()
 
 
 # ── Static + frontend ─────────────────────────────────────────────────────────
@@ -135,7 +140,9 @@ def reset_password(body: ResetPasswordRequest):
 def get_users(current_user=Depends(require_manager)):
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, username, role, hourly_rate FROM users ORDER BY role, username"
+            """SELECT u.id, u.username, u.role, u.hourly_rate, u.email, u.title, u.team_id, t.name as team_name
+               FROM users u LEFT JOIN teams t ON u.team_id = t.id
+               ORDER BY u.role, u.username"""
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -149,13 +156,19 @@ def create_user(body: CreateUserRequest, current_user=Depends(require_manager)):
         ).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="Username already taken")
+        if body.team_id is not None:
+            team = conn.execute("SELECT id FROM teams WHERE id = ?", (body.team_id,)).fetchone()
+            if not team:
+                raise HTTPException(status_code=404, detail="Team not found")
         cursor = conn.execute(
-            "INSERT INTO users (username, password, role, hourly_rate) VALUES (?, ?, ?, ?)",
-            (body.username, hash_password(body.password), body.role, body.hourly_rate)
+            "INSERT INTO users (username, password, role, hourly_rate, title, team_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (body.username, hash_password(body.password), body.role, body.hourly_rate, body.title, body.team_id)
         )
         conn.commit()
         row = conn.execute(
-            "SELECT id, username, role, hourly_rate FROM users WHERE id = ?", (cursor.lastrowid,)
+            """SELECT u.id, u.username, u.role, u.hourly_rate, u.email, u.title, u.team_id, t.name as team_name
+               FROM users u LEFT JOIN teams t ON u.team_id = t.id WHERE u.id = ?""",
+            (cursor.lastrowid,)
         ).fetchone()
     return dict(row)
 
@@ -177,12 +190,38 @@ def delete_user(user_id: int, current_user=Depends(require_manager)):
 
 @app.get("/users/basic", response_model=list[BasicUser])
 def get_basic_users(current_user=Depends(get_current_user)):
-    """Lightweight user list (id/username/role only) for picking meeting attendees."""
+    """Lightweight user list for picking meeting attendees — includes title/team
+    so people can tell who's who beyond just a username and access role."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, username, role FROM users ORDER BY role, username"
+            """SELECT u.id, u.username, u.role, u.title, t.name as team_name
+               FROM users u LEFT JOIN teams t ON u.team_id = t.id
+               ORDER BY u.role, u.username"""
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@app.patch("/users/{user_id}/profile", response_model=UserResponse)
+def update_user_profile(user_id: int, body: UpdateUserProfileRequest, current_user=Depends(require_manager)):
+    with get_connection() as conn:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if body.team_id is not None:
+            team = conn.execute("SELECT id FROM teams WHERE id = ?", (body.team_id,)).fetchone()
+            if not team:
+                raise HTTPException(status_code=404, detail="Team not found")
+        conn.execute(
+            "UPDATE users SET title = ?, team_id = ? WHERE id = ?",
+            (body.title, body.team_id, user_id)
+        )
+        conn.commit()
+        row = conn.execute(
+            """SELECT u.id, u.username, u.role, u.hourly_rate, u.email, u.title, u.team_id, t.name as team_name
+               FROM users u LEFT JOIN teams t ON u.team_id = t.id WHERE u.id = ?""",
+            (user_id,)
+        ).fetchone()
+    return dict(row)
 
 
 @app.patch("/users/{user_id}/rate", response_model=UserResponse)
@@ -205,12 +244,55 @@ def set_hourly_rate(user_id: int, body: UpdateRateRequest, current_user=Depends(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def get_daily_total(conn, user_id: int, date_str: str, exclude_id: int = None) -> float:
-    query = "SELECT COALESCE(SUM(hours), 0) FROM entries WHERE user_id = ? AND date = ?"
-    params = [user_id, date_str]
-    if exclude_id:
-        query += " AND id != ?"
-        params.append(exclude_id)
-    return conn.execute(query, params).fetchone()[0]
+    """Actual hours worked that day, from completed clock sessions — NOT from
+    task-log entries. Pay and overtime are both derived from clocked time;
+    entries.hours (if present) is an informational estimate the intern can
+    log for their own/manager's tracking, but never drives pay or overtime.
+    `exclude_id` is accepted for backward-compatible call signatures but has
+    no effect here, since clock sessions aren't tied to a specific entry."""
+    return _get_clocked_hours(conn, user_id, date_str, date_str)
+
+
+def _get_clocked_hours(conn, user_id: int, date_from: str, date_to: str) -> float:
+    """Sums completed clock-session durations whose clock-in date falls in
+    [date_from, date_to]. An ISO timestamp's first 10 characters are its
+    date, and ISO dates compare correctly as plain strings."""
+    rows = conn.execute(
+        """SELECT clocked_in_at, clocked_out_at FROM clock_sessions
+           WHERE user_id = ? AND clocked_out_at IS NOT NULL
+             AND substr(clocked_in_at, 1, 10) >= ? AND substr(clocked_in_at, 1, 10) <= ?""",
+        (user_id, date_from, date_to)
+    ).fetchall()
+    total = 0.0
+    for r in rows:
+        try:
+            start = datetime.fromisoformat(r["clocked_in_at"])
+            end = datetime.fromisoformat(r["clocked_out_at"])
+            total += (end - start).total_seconds() / 3600
+        except (ValueError, TypeError):
+            continue
+    return round(total, 2)
+
+
+def _get_clocked_hours_by_day(conn, user_id: int, date_from: str, date_to: str) -> dict:
+    """Same as _get_clocked_hours but broken out per calendar date, for the
+    weekly report's day-by-day breakdown."""
+    rows = conn.execute(
+        """SELECT clocked_in_at, clocked_out_at FROM clock_sessions
+           WHERE user_id = ? AND clocked_out_at IS NOT NULL
+             AND substr(clocked_in_at, 1, 10) >= ? AND substr(clocked_in_at, 1, 10) <= ?""",
+        (user_id, date_from, date_to)
+    ).fetchall()
+    by_day = {}
+    for r in rows:
+        try:
+            start = datetime.fromisoformat(r["clocked_in_at"])
+            end = datetime.fromisoformat(r["clocked_out_at"])
+        except (ValueError, TypeError):
+            continue
+        day = r["clocked_in_at"][:10]
+        by_day[day] = by_day.get(day, 0.0) + (end - start).total_seconds() / 3600
+    return {d: round(h, 2) for d, h in by_day.items()}
 
 
 # ── Entries ───────────────────────────────────────────────────────────────────
@@ -355,21 +437,14 @@ def get_stats(client_date: str = None, current_user=Depends(get_current_user)):
     with get_connection() as conn:
         if current_user["role"] == "manager":
             # Manager sees totals across all interns
-            today_hours = conn.execute(
-                "SELECT COALESCE(SUM(hours), 0) FROM entries WHERE date = ?", (today,)
-            ).fetchone()[0]
-            week_hours = conn.execute(
-                "SELECT COALESCE(SUM(hours), 0) FROM entries WHERE date >= ?", (week_start,)
-            ).fetchone()[0]
+            intern_ids = [r["id"] for r in conn.execute("SELECT id FROM users WHERE role = 'intern'").fetchall()]
+            today_hours = sum(_get_clocked_hours(conn, uid, today, today) for uid in intern_ids)
+            week_hours = sum(_get_clocked_hours(conn, uid, week_start, today) for uid in intern_ids)
             total = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
         else:
             uid = current_user["id"]
-            today_hours = conn.execute(
-                "SELECT COALESCE(SUM(hours), 0) FROM entries WHERE user_id = ? AND date = ?", (uid, today)
-            ).fetchone()[0]
-            week_hours = conn.execute(
-                "SELECT COALESCE(SUM(hours), 0) FROM entries WHERE user_id = ? AND date >= ?", (uid, week_start)
-            ).fetchone()[0]
+            today_hours = _get_clocked_hours(conn, uid, today, today)
+            week_hours = _get_clocked_hours(conn, uid, week_start, today)
             total = conn.execute(
                 "SELECT COUNT(*) FROM entries WHERE user_id = ?", (uid,)
             ).fetchone()[0]
@@ -385,109 +460,108 @@ def weekly_report(
     user_id: int = None,
     current_user=Depends(get_current_user)
 ):
-    # Every query always fetches u.hourly_rate as user_rate
-    # Pay is always calculated per entry: hours * user_rate
-    # This works for one intern, many interns, or mixed rates
-
+    # Two independent data sources, deliberately not mixed:
+    #   - entries: task-log activity + an informational time estimate the
+    #     intern can log for their own/manager's tracking. Approved/rejected
+    #     status matters for accountability, but NEVER affects pay.
+    #   - clock_sessions: the sole, unconditional source of pay. "total" and
+    #     "pay" below both come from clocked time, not from entries.hours.
     with get_connection() as conn:
         if current_user["role"] == "manager" and user_id:
-            rows = [dict(r) for r in conn.execute(
-                """SELECT e.*, u.username, u.hourly_rate as user_rate FROM entries e
-                   JOIN users u ON e.user_id = u.id
-                   WHERE e.user_id = ? AND e.date >= ? AND e.date <= ?
-                   ORDER BY e.date ASC, e.created_at ASC""",
-                (user_id, date_from, date_to)
-            ).fetchall()]
+            target_user_ids = [user_id]
         elif current_user["role"] == "manager":
+            target_user_ids = [r["id"] for r in conn.execute("SELECT id FROM users WHERE role = 'intern'").fetchall()]
+        else:
+            target_user_ids = [current_user["id"]]
+
+        user_rates = {r["id"]: r["hourly_rate"] for r in conn.execute(
+            f"SELECT id, hourly_rate FROM users WHERE id IN ({','.join('?' * len(target_user_ids))})",
+            target_user_ids
+        ).fetchall()} if target_user_ids else {}
+        usernames = {r["id"]: r["username"] for r in conn.execute(
+            f"SELECT id, username FROM users WHERE id IN ({','.join('?' * len(target_user_ids))})",
+            target_user_ids
+        ).fetchall()} if target_user_ids else {}
+
+        if target_user_ids:
+            placeholders = ",".join("?" * len(target_user_ids))
             rows = [dict(r) for r in conn.execute(
-                """SELECT e.*, u.username, u.hourly_rate as user_rate FROM entries e
-                   JOIN users u ON e.user_id = u.id
-                   WHERE u.role = 'intern' AND e.date >= ? AND e.date <= ?
-                   ORDER BY e.date ASC, e.created_at ASC""",
-                (date_from, date_to)
+                f"""SELECT e.*, u.username, u.hourly_rate as user_rate FROM entries e
+                    JOIN users u ON e.user_id = u.id
+                    WHERE e.user_id IN ({placeholders}) AND e.date >= ? AND e.date <= ?
+                    ORDER BY e.date ASC, e.created_at ASC""",
+                target_user_ids + [date_from, date_to]
             ).fetchall()]
         else:
-            rows = [dict(r) for r in conn.execute(
-                """SELECT e.*, u.username, u.hourly_rate as user_rate FROM entries e
-                   JOIN users u ON e.user_id = u.id
-                   WHERE e.user_id = ? AND e.date >= ? AND e.date <= ?
-                   ORDER BY e.date ASC, e.created_at ASC""",
-                (current_user["id"], date_from, date_to)
-            ).fetchall()]
+            rows = []
 
-        for row in rows:
-            row["overtime"] = get_daily_total(conn, row["user_id"], row["date"]) > 8
+        # Actual worked hours per user per day — the sole basis for pay/overtime.
+        clocked_by_user_day = {uid: _get_clocked_hours_by_day(conn, uid, date_from, date_to) for uid in target_user_ids}
 
-    # For display: show the rate if all entries share the same rate, else -1 (mixed rates)
-    rates = list(set(r["user_rate"] for r in rows)) if rows else [0.0]
-    display_rate = rates[0] if len(rates) == 1 else -1.0
+    multi_user = len(target_user_ids) > 1
 
-    # Get unique users in this report
-    user_ids = list(dict.fromkeys(r["user_id"] for r in rows))
-    multi_user = len(user_ids) > 1
-
-    # Group by date + user so overtime is per person per day
-    days_map = {}  # date -> { user_id -> {username, Self-study, Meeting, Other} }
+    # Category breakdown (informational only) grouped by date + user
+    entries_map = {}  # date -> { user_id -> {Self-study, Meeting, Other} }
     for r in rows:
-        d = r["date"]
-        uid = r["user_id"]
-        if d not in days_map:
-            days_map[d] = {}
-        if uid not in days_map[d]:
-            days_map[d][uid] = {"username": r["username"], "Self-study": 0, "Meeting": 0, "Other": 0, "user_rate": r["user_rate"]}
-        days_map[d][uid][r["category"]] += r["hours"]
+        d, uid = r["date"], r["user_id"]
+        entries_map.setdefault(d, {}).setdefault(uid, {"Self-study": 0, "Meeting": 0, "Other": 0})
+        entries_map[d][uid][r["category"]] += r["hours"]
+
+    # A day belongs in the report if it has EITHER a task log OR clocked
+    # time — someone who clocked in/out but logged no tasks that day still
+    # needs to show up and get paid for it.
+    all_dates = set(entries_map.keys())
+    for uid in target_user_ids:
+        all_dates.update(clocked_by_user_day.get(uid, {}).keys())
+    all_dates = {d for d in all_dates if date_from <= d <= date_to}
 
     days = []
-    for d in sorted(days_map.keys()):
-        user_totals = days_map[d]
-        # Day total across all users
-        day_total = sum(
-            v["Self-study"] + v["Meeting"] + v["Other"]
-            for v in user_totals.values()
-        )
-        # Overtime only if ANY single user exceeds 8h that day
-        any_overtime = any(
-            v["Self-study"] + v["Meeting"] + v["Other"] > 8
-            for v in user_totals.values()
-        )
-        approved_day_pay = sum(
-            r["hours"] * r["user_rate"]
-            for r in rows if r["date"] == d and r["status"] == "approved"
-        )
+    for d in sorted(all_dates):
+        cat_by_user = entries_map.get(d, {})
+        day_clocked_total = sum(clocked_by_user_day.get(uid, {}).get(d, 0.0) for uid in target_user_ids)
+        any_overtime = any(clocked_by_user_day.get(uid, {}).get(d, 0.0) > 8 for uid in target_user_ids)
+        day_pay = sum(clocked_by_user_day.get(uid, {}).get(d, 0.0) * user_rates.get(uid, 0.0) for uid in target_user_ids)
+
         days.append(WeeklyReportDay(
             date=d,
-            self_study=round(sum(v["Self-study"] for v in user_totals.values()), 2),
-            meeting=round(sum(v["Meeting"] for v in user_totals.values()), 2),
-            other=round(sum(v["Other"] for v in user_totals.values()), 2),
-            total=round(day_total, 2),
-            approved_pay=round(approved_day_pay, 2),
+            self_study=round(sum(v["Self-study"] for v in cat_by_user.values()), 2),
+            meeting=round(sum(v["Meeting"] for v in cat_by_user.values()), 2),
+            other=round(sum(v["Other"] for v in cat_by_user.values()), 2),
+            total=round(day_clocked_total, 2),
+            approved_pay=round(day_pay, 2),
             any_overtime=any_overtime,
             user_breakdown=[
                 {
-                    "username": v["username"],
-                    "self_study": round(v["Self-study"], 2),
-                    "meeting": round(v["Meeting"], 2),
-                    "other": round(v["Other"], 2),
-                    "total": round(v["Self-study"] + v["Meeting"] + v["Other"], 2),
-                    "overtime": v["Self-study"] + v["Meeting"] + v["Other"] > 8,
-                    "approved_pay": round(sum(
-                        r["hours"] * r["user_rate"]
-                        for r in rows
-                        if r["date"] == d and r["user_id"] == uid and r["status"] == "approved"
-                    ), 2)
+                    "username": usernames.get(uid, "?"),
+                    "self_study": round(cat_by_user.get(uid, {}).get("Self-study", 0), 2),
+                    "meeting": round(cat_by_user.get(uid, {}).get("Meeting", 0), 2),
+                    "other": round(cat_by_user.get(uid, {}).get("Other", 0), 2),
+                    "total": round(clocked_by_user_day.get(uid, {}).get(d, 0.0), 2),
+                    "overtime": clocked_by_user_day.get(uid, {}).get(d, 0.0) > 8,
+                    "approved_pay": round(clocked_by_user_day.get(uid, {}).get(d, 0.0) * user_rates.get(uid, 0.0), 2)
                 }
-                for uid, v in user_totals.items()
+                for uid in target_user_ids
+                if uid in cat_by_user or clocked_by_user_day.get(uid, {}).get(d, 0.0) > 0
             ] if multi_user else []
         ))
 
-    total_hours = sum(r["hours"] for r in rows)
-    approved_rows = [r for r in rows if r["status"] == "approved"]
+    rates = list(set(user_rates.values())) if user_rates else [0.0]
+    display_rate = rates[0] if len(rates) == 1 else -1.0
+
+    total_hours = sum(sum(clocked_by_user_day.get(uid, {}).values()) for uid in target_user_ids)
+    total_pay = sum(
+        sum(clocked_by_user_day.get(uid, {}).values()) * user_rates.get(uid, 0.0)
+        for uid in target_user_ids
+    )
     category_totals = {
         "Self-study": round(sum(r["hours"] for r in rows if r["category"] == "Self-study"), 2),
         "Meeting": round(sum(r["hours"] for r in rows if r["category"] == "Meeting"), 2),
         "Other": round(sum(r["hours"] for r in rows if r["category"] == "Other"), 2),
     }
-    total_pay = round(sum(r["hours"] * r["user_rate"] for r in approved_rows), 2)
+
+    with get_connection() as conn:
+        for row in rows:
+            row["overtime"] = get_daily_total(conn, row["user_id"], row["date"]) > 8
 
     return WeeklyReport(
         from_date=date_from,
@@ -496,7 +570,7 @@ def weekly_report(
         category_totals=category_totals,
         total_hours=round(total_hours, 2),
         hourly_rate=display_rate,
-        total_pay=total_pay,
+        total_pay=round(total_pay, 2),
         entries=rows
     )
 
@@ -550,10 +624,135 @@ def clock_out(current_user=Depends(get_current_user)):
         )
         conn.commit()
         elapsed = (datetime.utcnow() - datetime.fromisoformat(active["clocked_in_at"])).total_seconds() / 3600
-    return {"clocked_in_at": active["clocked_in_at"], "clocked_out_at": now, "hours": max(0.5, round(elapsed * 2) / 2)}
+    # Exact elapsed time, not rounded to the half-hour and not floored to
+    # 0.5h regardless of duration — a 3-minute session now logs ~0.05h,
+    # not 0.5h. The tiny floor below only guards against a session so short
+    # (a fraction of a second) that rounding to 2 decimals would hit exactly
+    # 0.00, which EntryCreate's hours > 0 validation would otherwise reject.
+    hours = max(0.01, round(elapsed, 2))
+    return {"clocked_in_at": active["clocked_in_at"], "clocked_out_at": now, "hours": hours}
+
+
+def _clock_session_with_hours(row) -> dict:
+    result = dict(row)
+    result["is_active"] = bool(result["is_active"])
+    result["auto_closed"] = bool(result["auto_closed"])
+    result["hours"] = None
+    if result["clocked_out_at"]:
+        try:
+            start = datetime.fromisoformat(result["clocked_in_at"])
+            end = datetime.fromisoformat(result["clocked_out_at"])
+            result["hours"] = round((end - start).total_seconds() / 3600, 2)
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
+@app.get("/clock-sessions", response_model=list[ClockSessionResponse])
+def get_clock_sessions(user_id: int = None, date_from: str = None, date_to: str = None,
+                        current_user=Depends(require_manager)):
+    """Manager-only review surface — especially for spotting auto-closed
+    sessions (a likely-forgotten clock-out) that may need correcting."""
+    query = """SELECT cs.*, u.username FROM clock_sessions cs
+               JOIN users u ON cs.user_id = u.id WHERE 1=1"""
+    params = []
+    if user_id:
+        query += " AND cs.user_id = ?"
+        params.append(user_id)
+    if date_from:
+        query += " AND substr(cs.clocked_in_at, 1, 10) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND substr(cs.clocked_in_at, 1, 10) <= ?"
+        params.append(date_to)
+    query += " ORDER BY cs.clocked_in_at DESC"
+
+    with get_connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [_clock_session_with_hours(r) for r in rows]
+
+
+@app.patch("/clock-sessions/{session_id}", response_model=ClockSessionResponse)
+def update_clock_session(session_id: int, body: ClockSessionUpdate, current_user=Depends(require_manager)):
+    """Correct a clock session — the safety net for a forgotten clock-out
+    (whether auto-closed by the 12h cap or still stuck active) or any other
+    honest mistake. This directly affects pay, since pay is computed purely
+    from clock sessions now — so this is deliberately manager-only."""
+    with get_connection() as conn:
+        session = conn.execute("SELECT * FROM clock_sessions WHERE id = ?", (session_id,)).fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Clock session not found")
+
+        clocked_in_at = body.clocked_in_at or session["clocked_in_at"]
+        clocked_out_at = body.clocked_out_at if body.clocked_out_at is not None else session["clocked_out_at"]
+
+        try:
+            start = datetime.fromisoformat(clocked_in_at)
+            if clocked_out_at and datetime.fromisoformat(clocked_out_at) <= start:
+                raise HTTPException(status_code=400, detail="Clock-out must be after clock-in")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date/time format")
+
+        # A manually-corrected session is no longer "active" or "auto-closed"
+        # once it has a clock-out time — it's now a settled, reviewed record.
+        is_active = 0 if clocked_out_at else session["is_active"]
+        auto_closed = 0 if clocked_out_at else session["auto_closed"]
+
+        conn.execute(
+            "UPDATE clock_sessions SET clocked_in_at = ?, clocked_out_at = ?, is_active = ?, auto_closed = ? WHERE id = ?",
+            (clocked_in_at, clocked_out_at, is_active, auto_closed, session_id)
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT cs.*, u.username FROM clock_sessions cs JOIN users u ON cs.user_id = u.id WHERE cs.id = ?",
+            (session_id,)
+        ).fetchone()
+        return _clock_session_with_hours(row)
 
 
 # ── Meetings ──────────────────────────────────────────────────────────────────
+
+@app.get("/teams", response_model=list[TeamResponse])
+def get_teams(current_user=Depends(get_current_user)):
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM teams ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.post("/teams", response_model=TeamResponse, status_code=201)
+def create_team(body: TeamCreate, current_user=Depends(require_manager)):
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM teams WHERE name = ?", (body.name,)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"A team named \"{body.name}\" already exists")
+        cursor = conn.execute("INSERT INTO teams (name) VALUES (?)", (body.name,))
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM teams WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+
+@app.patch("/teams/{team_id}", response_model=TeamResponse)
+def update_team(team_id: int, body: TeamUpdate, current_user=Depends(require_manager)):
+    with get_connection() as conn:
+        team = conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone()
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found")
+        existing = conn.execute("SELECT id FROM teams WHERE name = ? AND id != ?", (body.name, team_id)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"A team named \"{body.name}\" already exists")
+        conn.execute("UPDATE teams SET name = ? WHERE id = ?", (body.name, team_id))
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone())
+
+
+@app.delete("/teams/{team_id}", status_code=204)
+def delete_team(team_id: int, current_user=Depends(require_manager)):
+    with get_connection() as conn:
+        # Unassign any members rather than blocking deletion or cascading —
+        # losing a team grouping shouldn't take people's other data with it.
+        conn.execute("UPDATE users SET team_id = NULL WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+        conn.commit()
+
 
 @app.get("/rooms", response_model=list[RoomResponse])
 def get_rooms(current_user=Depends(get_current_user)):
@@ -721,7 +920,7 @@ def _generate_recurrence_dates(start_date: str, rule: str, until: str) -> list:
 
 
 def _create_one_meeting(conn, organizer, body: MeetingCreate, occurrence_date: str,
-                         room: str, meeting_link: str, recurrence_group_id: str):
+                         room: str, meeting_link: str, recurrence_group_id: str, attendee_tokens: dict):
     """Inserts a single meeting row + its attendee invites. Returns (meeting_id, invitees) or
     (None, None) if skipped due to a room conflict."""
     if body.location_type == "in_person" and _rooms_overlap(conn, occurrence_date, body.start_time, body.end_time, room):
@@ -740,7 +939,7 @@ def _create_one_meeting(conn, organizer, body: MeetingCreate, occurrence_date: s
     for uid in set(body.attendee_ids) - {organizer["id"]}:
         attendee = conn.execute("SELECT id, username, email FROM users WHERE id = ?", (uid,)).fetchone()
         if attendee:
-            token = secrets.token_urlsafe(24)
+            token = attendee_tokens[uid]
             conn.execute(
                 "INSERT OR IGNORE INTO meeting_attendees (meeting_id, user_id, status, rsvp_token) VALUES (?, ?, 'pending', ?)",
                 (meeting_id, uid, token)
@@ -797,6 +996,65 @@ def _email_invites_for_meeting(organizer, body: MeetingCreate, occurrence_date: 
             print(f"❌ Failed to email organizer {organizer['email']}: {exc}")
 
 
+def _email_series_invite(organizer, body: MeetingCreate, room: str, meeting_link: str,
+                          created_ids: list, attendee_tokens: dict, recurrence_group_id: str) -> None:
+    """For a recurring series: ONE invite per attendee covering the whole series, not one
+    per occurrence. Responding via this email applies to every occurrence at once, since
+    every occurrence's attendee row shares the same token for this attendee."""
+    first_meeting_id, first_date, invitees = created_ids[0]
+    all_guest_names = [inv["username"] for inv in invitees]
+    all_guest_emails = [inv["email"] for inv in invitees if inv.get("email")]
+
+    for invitee in invitees:
+        token = attendee_tokens.get(invitee["id"])
+        if invitee.get("email") and token:
+            try:
+                email_utils.send_recurring_series_invite(
+                    to_email=invitee["email"],
+                    attendee_name=invitee["username"],
+                    organizer_name=organizer["username"],
+                    title=body.title,
+                    first_date=first_date,
+                    start_time=body.start_time,
+                    end_time=body.end_time,
+                    description=body.description,
+                    rsvp_token=token,
+                    location_type=body.location_type,
+                    room=room,
+                    meeting_link=meeting_link,
+                    guests=all_guest_names,
+                    recurrence=body.recurrence,
+                    recurrence_until=body.recurrence_until,
+                    occurrence_count=len(created_ids),
+                    recurrence_group_id=recurrence_group_id,
+                    organizer_email=organizer.get("email"),
+                    attendee_emails=all_guest_emails
+                )
+            except Exception as exc:
+                print(f"❌ Failed to email {invitee['email']}: {exc}")
+
+    if organizer.get("email"):
+        try:
+            email_utils.send_organizer_series_confirmation(
+                to_email=organizer["email"],
+                organizer_name=organizer["username"],
+                title=body.title,
+                first_date=first_date,
+                start_time=body.start_time,
+                end_time=body.end_time,
+                description=body.description,
+                location_type=body.location_type,
+                room=room,
+                meeting_link=meeting_link,
+                guests=all_guest_names,
+                recurrence=body.recurrence,
+                recurrence_until=body.recurrence_until,
+                occurrence_count=len(created_ids)
+            )
+        except Exception as exc:
+            print(f"❌ Failed to email organizer {organizer['email']}: {exc}")
+
+
 @app.post("/meetings", response_model=MeetingResponse, status_code=201)
 def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, current_user=Depends(get_current_user)):
     if body.end_time <= body.start_time:
@@ -836,6 +1094,11 @@ def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, curre
             )
         recurrence_group_id = uuid.uuid4().hex
 
+    # One token per attendee, shared across every occurrence in the series —
+    # this is what lets a single email (and a single Accept/Decline click)
+    # apply to the whole series instead of needing one response per occurrence.
+    attendee_tokens = {uid: secrets.token_urlsafe(24) for uid in set(body.attendee_ids) - {current_user["id"]}}
+
     created_ids = []
     skipped_dates = []
     with get_connection() as conn:
@@ -848,7 +1111,7 @@ def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, curre
                 )
         for occurrence_date in occurrence_dates:
             meeting_id, invitees = _create_one_meeting(
-                conn, current_user, body, occurrence_date, room, meeting_link, recurrence_group_id
+                conn, current_user, body, occurrence_date, room, meeting_link, recurrence_group_id, attendee_tokens
             )
             if meeting_id is None:
                 skipped_dates.append(occurrence_date)
@@ -864,13 +1127,21 @@ def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, curre
 
         result = _meeting_with_attendees(conn, created_ids[0][0])
 
-    # Emails (including SMTP round-trips and, for recurring series, one send
-    # per occurrence) are queued to run *after* the response goes out — this
-    # is what makes creating a recurring meeting with several attendees feel
-    # instant instead of blocking the request for several seconds, which was
-    # making the very next fetch (the calendar refresh) race a still-busy
-    # server and occasionally fail with "Failed to fetch".
-    for meeting_id, occurrence_date, invitees in created_ids:
+    # Emails are queued to run *after* the response goes out — this is what
+    # makes creating a meeting feel instant instead of blocking the request
+    # on SMTP round-trips, which was making the very next fetch (the
+    # calendar refresh) race a still-busy server and occasionally fail with
+    # "Failed to fetch".
+    #
+    # For a recurring series this sends exactly ONE invite per attendee
+    # covering the whole series — not one per occurrence, which used to
+    # flood the inbox with N emails all landing within the same minute.
+    if recurrence_group_id:
+        background_tasks.add_task(
+            _email_series_invite, current_user, body, room, meeting_link, created_ids, attendee_tokens, recurrence_group_id
+        )
+    else:
+        meeting_id, occurrence_date, invitees = created_ids[0]
         background_tasks.add_task(
             _email_invites_for_meeting, current_user, body, occurrence_date, room, meeting_link, invitees, meeting_id
         )
@@ -1073,22 +1344,27 @@ def rsvp_via_email_link(token: str, action: str):
         return HTMLResponse(_rsvp_confirmation_page("Invalid link", "This RSVP link isn't valid."), status_code=400)
     status = "accepted" if action == "accept" else "declined"
     with get_connection() as conn:
-        row = conn.execute(
+        # A recurring series shares one token per attendee across every
+        # occurrence, so one click here applies to all of them at once —
+        # fetchall, not fetchone.
+        rows = conn.execute(
             "SELECT * FROM meeting_attendees WHERE rsvp_token = ?", (token,)
-        ).fetchone()
-        if not row:
+        ).fetchall()
+        if not rows:
             return HTMLResponse(
                 _rsvp_confirmation_page("Link expired", "This RSVP link is invalid or has already been used."),
                 status_code=404
             )
-        conn.execute(
-            "UPDATE meeting_attendees SET status = ? WHERE meeting_id = ? AND user_id = ?",
-            (status, row["meeting_id"], row["user_id"])
-        )
+        for row in rows:
+            conn.execute(
+                "UPDATE meeting_attendees SET status = ? WHERE meeting_id = ? AND user_id = ?",
+                (status, row["meeting_id"], row["user_id"])
+            )
         conn.commit()
-        meeting = conn.execute("SELECT title FROM meetings WHERE id = ?", (row["meeting_id"],)).fetchone()
+        meeting = conn.execute("SELECT title FROM meetings WHERE id = ?", (rows[0]["meeting_id"],)).fetchone()
     title = "You're in! ✅" if status == "accepted" else "Response recorded"
-    message = f'You have {status} the invite to "{meeting["title"] if meeting else "the meeting"}".'
+    count_note = f" — all {len(rows)} occurrences in the series" if len(rows) > 1 else ""
+    message = f'You have {status} the invite to "{meeting["title"] if meeting else "the meeting"}"{count_note}.'
     # Only declines get the optional note form — no need to explain an acceptance.
     return HTMLResponse(_rsvp_confirmation_page(title, message, decline_note_token=token if status == "declined" else None))
 
@@ -1096,15 +1372,16 @@ def rsvp_via_email_link(token: str, action: str):
 @app.post("/meetings/rsvp/note", response_class=HTMLResponse)
 def rsvp_add_decline_note(token: str = Form(...), reason: str = Form("")):
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM meeting_attendees WHERE rsvp_token = ?", (token,)).fetchone()
-        if not row:
+        rows = conn.execute("SELECT * FROM meeting_attendees WHERE rsvp_token = ?", (token,)).fetchall()
+        if not rows:
             return HTMLResponse(
                 _rsvp_confirmation_page("Link expired", "This RSVP link is invalid or has already been used."),
                 status_code=404
             )
-        conn.execute(
-            "UPDATE meeting_attendees SET decline_reason = ? WHERE meeting_id = ? AND user_id = ?",
-            (reason.strip()[:500] or None, row["meeting_id"], row["user_id"])
-        )
+        for row in rows:
+            conn.execute(
+                "UPDATE meeting_attendees SET decline_reason = ? WHERE meeting_id = ? AND user_id = ?",
+                (reason.strip()[:500] or None, row["meeting_id"], row["user_id"])
+            )
         conn.commit()
     return HTMLResponse(_rsvp_confirmation_page("Thanks!", "Your note has been sent to the organizer."))

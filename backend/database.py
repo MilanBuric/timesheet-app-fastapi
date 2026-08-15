@@ -38,6 +38,20 @@ def init_db():
         # credentials for auto-generated Meet links, instead of one shared token
         if "google_token" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN google_token TEXT")
+        # Migration: job title (free text) and team assignment (structured,
+        # like rooms) — title varies per person so stays free text, team
+        # benefits from consistency so it's its own managed entity below
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS teams (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL UNIQUE,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        if "title" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN title TEXT")
+        if "team_id" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN team_id INTEGER REFERENCES teams(id)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS entries (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,9 +74,13 @@ def init_db():
                 user_id         INTEGER NOT NULL REFERENCES users(id),
                 clocked_in_at   TEXT    NOT NULL,
                 clocked_out_at  TEXT,
-                is_active       INTEGER NOT NULL DEFAULT 1
+                is_active       INTEGER NOT NULL DEFAULT 1,
+                auto_closed     INTEGER NOT NULL DEFAULT 0
             )
         """)
+        cs_cols = [r["name"] for r in conn.execute("PRAGMA table_info(clock_sessions)").fetchall()]
+        if "auto_closed" not in cs_cols:
+            conn.execute("ALTER TABLE clock_sessions ADD COLUMN auto_closed INTEGER NOT NULL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS meetings (
                 id                     INTEGER PRIMARY KEY AUTOINCREMENT,

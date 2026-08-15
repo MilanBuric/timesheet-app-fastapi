@@ -8,6 +8,7 @@ const app = (() => {
   let selectedCalendarDate = null;
   let monthMeetings = [];
   let roomsList = [];
+  let teamsList = [];
   let meetingSearchDebounce = null;
   let meetingsPollTimer = null;
   let meetingsViewActive = false;
@@ -28,9 +29,56 @@ const app = (() => {
   function showLogin() {
     document.getElementById('login-screen').classList.remove('hidden');
     document.getElementById('app-screen').classList.add('hidden');
+    // showLogin() is reachable from several places (logout, session expiry,
+    // the tail end of the reset-password flow) — always fully close the
+    // other auth sub-screens too, so one never keeps showing stacked
+    // underneath/alongside the plain login form.
+    document.getElementById('forgot-password-screen').classList.add('hidden');
+    document.getElementById('reset-password-screen').classList.add('hidden');
+  }
+
+  // Resets everything that must never carry over from one logged-in session
+  // to the next on the same browser tab: which view is showing, any open
+  // modal, and every module-level cache of a previous user's data. Without
+  // this, logging out (or logging in as someone else right after) left
+  // whatever view was last open on screen — including its stale, already-
+  // rendered HTML from the PREVIOUS user's role and data — visible until a
+  // full page reload happened to reset it.
+  function resetToCleanState() {
+    stopMeetingsPolling();
+    meetingsViewActive = false;
+
+    document.querySelectorAll('.nav-item').forEach(l => l.classList.remove('active'));
+    const dashboardNav = document.querySelector('.nav-item[data-view="dashboard"]');
+    if (dashboardNav) dashboardNav.classList.add('active');
+    ['dashboard', 'entries', 'report', 'meetings', 'users'].forEach(v => {
+      const el = document.getElementById(`view-${v}`);
+      if (el) el.classList.toggle('hidden', v !== 'dashboard');
+    });
+    const titleEl = document.getElementById('view-title');
+    if (titleEl) titleEl.textContent = 'Dashboard';
+
+    ['edit-modal', 'reject-modal', 'reschedule-modal'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('hidden');
+    });
+
+    // Drop every cached render/fetch result from the previous session —
+    // the next login re-fetches everything fresh and role-scoped.
+    allEntries = [];
+    reportPeriod = 'week';
+    reportOffset = 0;
+    currentReport = null;
+    calendarYear = undefined;
+    calendarMonth = undefined;
+    selectedCalendarDate = null;
+    monthMeetings = [];
+    roomsList = [];
+    teamsList = [];
   }
 
   function showApp() {
+    resetToCleanState();
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app-screen').classList.remove('hidden');
     document.getElementById('current-username').textContent = currentUser.username;
@@ -58,8 +106,7 @@ const app = (() => {
   }
 
   function handleLogout() {
-    stopMeetingsPolling();
-    meetingsViewActive = false;
+    resetToCleanState();
     api.logout();
     currentUser = null;
     showLogin();
@@ -162,7 +209,7 @@ const app = (() => {
         meetingsViewActive = (view === 'meetings');
         if (view === 'meetings') { loadMeetingsView(); startMeetingsPolling(); }
         else { stopMeetingsPolling(); }
-        if (view === 'users') { loadUsers(); loadRooms(); }
+        if (view === 'users') { loadUsers(); loadTeams(); loadRooms(); loadClockSessions(); }
       });
     });
     // A colleague's RSVP (from the emailed link, or another session) doesn't
@@ -239,34 +286,33 @@ const app = (() => {
     if (hours > 8 && !confirm(`⚠️ You're logging ${hours}h which exceeds 8h. Continue?`)) return;
     try {
       await api.createEntry({ date, hours, category, activity, force: false });
-      document.getElementById('entry-hours').value = '';
-      document.getElementById('entry-activity').value = '';
-      await Promise.all([loadStats(), loadRecentEntries()]);
     } catch (err) {
       if (err.status === 409) {
         if (confirm(`⚠️ ${err.message}\n\nLog it anyway?`)) {
-          await api.createEntry({ date, hours, category, activity, force: true });
-          document.getElementById('entry-hours').value = '';
-          document.getElementById('entry-activity').value = '';
-          await Promise.all([loadStats(), loadRecentEntries()]);
-        }
-      } else { alert('Failed to save entry.'); }
+          try {
+            await api.createEntry({ date, hours, category, activity, force: true });
+          } catch { alert('Failed to save entry.'); return; }
+        } else { return; }
+      } else { alert('Failed to save entry.'); return; }
     }
+    document.getElementById('entry-hours').value = '';
+    document.getElementById('entry-activity').value = '';
+    await refreshEntriesResilient();
   }
 
   async function deleteEntry(id) {
     if (!confirm('Delete this entry?')) return;
     try {
       await api.deleteEntry(id);
-      await Promise.all([loadStats(), loadRecentEntries(), loadEntries()]);
-    } catch { alert('Failed to delete entry.'); }
+    } catch { alert('Failed to delete entry.'); return; }
+    await refreshEntriesResilient(true);
   }
 
   async function approveEntry(id) {
     try {
       await api.approveEntry(id);
-      await Promise.all([loadRecentEntries(), loadEntries()]);
-    } catch { alert('Failed to approve.'); }
+    } catch { alert('Failed to approve.'); return; }
+    await refreshEntriesResilient(true);
   }
 
   function openRejectModal(id) {
@@ -288,9 +334,29 @@ const app = (() => {
     }
     try {
       await api.rejectEntry(id, reason);
-      closeRejectModal();
-      await Promise.all([loadRecentEntries(), loadEntries()]);
-    } catch { alert('Failed to reject entry.'); }
+    } catch { alert('Failed to reject entry.'); return; }
+    closeRejectModal();
+    await refreshEntriesResilient(true);
+  }
+
+  // Wraps the post-action refresh with one quiet retry, same pattern already
+  // proven for the Meetings tab — a refresh hiccup must never be reported
+  // as if the action itself (add/delete/approve/reject) had failed, since
+  // by the time this runs the action has already succeeded server-side.
+  async function refreshEntriesResilient(includeEntriesList = false) {
+    const doRefresh = () => includeEntriesList
+      ? Promise.all([loadStats(), loadRecentEntries(), loadEntries()])
+      : Promise.all([loadStats(), loadRecentEntries()]);
+    try {
+      await doRefresh();
+    } catch {
+      await new Promise(r => setTimeout(r, 600));
+      try {
+        await doRefresh();
+      } catch {
+        console.warn('Could not refresh entries automatically — it will catch up on the next action.');
+      }
+    }
   }
 
   // ── Quick filters ─────────────────────────────────────────────────────────
@@ -356,7 +422,7 @@ const app = (() => {
       try {
         const result = await api.clockOut();
         timer.stop();
-        document.getElementById('entry-hours').value = result.hours.toFixed(1);
+        document.getElementById('entry-hours').value = result.hours.toFixed(2);
         document.getElementById('entry-date').value = today();
         document.getElementById('entry-activity').focus();
       } catch { alert('Failed to clock out.'); }
@@ -440,15 +506,19 @@ const app = (() => {
 
     // Summary stats
     document.getElementById('report-summary').innerHTML = `
-      <div class="report-stat"><div class="report-stat-label">Total hours</div><div class="report-stat-value">${r.total_hours.toFixed(1)}h</div></div>
-      <div class="report-stat"><div class="report-stat-label">Self-study</div><div class="report-stat-value">${(r.category_totals['Self-study'] || 0).toFixed(1)}h</div></div>
-      <div class="report-stat"><div class="report-stat-label">Meetings</div><div class="report-stat-value">${(r.category_totals['Meeting'] || 0).toFixed(1)}h</div></div>
-      <div class="report-stat pay-stat"><div class="report-stat-label">Est. pay ${r.hourly_rate > 0 ? '@ €' + r.hourly_rate + '/h' : r.hourly_rate === -1 ? '(mixed rates)' : '(no rate set)'}</div><div class="report-stat-value pay-value">${r.total_pay > 0 ? fmtCurrency(r.total_pay) : '—'}</div></div>
+      <div class="report-stat"><div class="report-stat-label">Hours worked (clocked)</div><div class="report-stat-value">${r.total_hours.toFixed(2)}h</div></div>
+      <div class="report-stat"><div class="report-stat-label">Self-study (logged)</div><div class="report-stat-value">${(r.category_totals['Self-study'] || 0).toFixed(1)}h</div></div>
+      <div class="report-stat"><div class="report-stat-label">Meetings (logged)</div><div class="report-stat-value">${(r.category_totals['Meeting'] || 0).toFixed(1)}h</div></div>
+      <div class="report-stat pay-stat"><div class="report-stat-label">Pay ${r.hourly_rate > 0 ? '@ €' + r.hourly_rate + '/h' : r.hourly_rate === -1 ? '(mixed rates)' : '(no rate set)'}</div><div class="report-stat-value pay-value">${r.total_pay > 0 ? fmtCurrency(r.total_pay) : '—'}</div></div>
     `;
 
     // Category breakdown table
     if (r.days.length) {
       document.getElementById('report-category-table').innerHTML = `
+        <p class="card-subtitle" style="margin-bottom:10px;">
+          Self-study/Meeting/Other are task-log estimates for tracking — they may not add up to "Clocked",
+          which is actual time worked and the only thing pay is based on.
+        </p>
         <div class="cat-table-wrap">
           <table class="cat-table">
             <thead>
@@ -457,7 +527,7 @@ const app = (() => {
                 <th>Self-study</th>
                 <th>Meeting</th>
                 <th>Other</th>
-                <th>Total</th>
+                <th>Clocked</th>
                 ${r.total_pay > 0 ? '<th>Pay</th>' : ''}
               </tr>
             </thead>
@@ -468,7 +538,7 @@ const app = (() => {
                   <td>${d.self_study > 0 ? d.self_study.toFixed(1) + 'h' : '—'}</td>
                   <td>${d.meeting > 0 ? d.meeting.toFixed(1) + 'h' : '—'}</td>
                   <td>${d.other > 0 ? d.other.toFixed(1) + 'h' : '—'}</td>
-                  <td><strong>${d.total.toFixed(1)}h ${d.any_overtime ? '⚠️' : ''}</strong></td>
+                  <td><strong>${d.total.toFixed(2)}h ${d.any_overtime ? '⚠️' : ''}</strong></td>
                   ${r.total_pay > 0 ? `<td>${fmtCurrency(d.approved_pay)}</td>` : ''}
                 </tr>
                 ${d.user_breakdown && d.user_breakdown.length > 0 ? d.user_breakdown.map(u => `
@@ -477,7 +547,7 @@ const app = (() => {
                     <td>${u.self_study > 0 ? u.self_study.toFixed(1) + 'h' : '—'}</td>
                     <td>${u.meeting > 0 ? u.meeting.toFixed(1) + 'h' : '—'}</td>
                     <td>${u.other > 0 ? u.other.toFixed(1) + 'h' : '—'}</td>
-                    <td>${u.total.toFixed(1)}h</td>
+                    <td>${u.total.toFixed(2)}h</td>
                     ${r.total_pay > 0 ? `<td>${fmtCurrency(u.approved_pay)}</td>` : ''}
                   </tr>`).join('') : ''}
               `).join('')}
@@ -488,7 +558,7 @@ const app = (() => {
                 <td><strong>${(r.category_totals['Self-study'] || 0).toFixed(1)}h</strong></td>
                 <td><strong>${(r.category_totals['Meeting'] || 0).toFixed(1)}h</strong></td>
                 <td><strong>${(r.category_totals['Other'] || 0).toFixed(1)}h</strong></td>
-                <td><strong>${r.total_hours.toFixed(1)}h</strong></td>
+                <td><strong>${r.total_hours.toFixed(2)}h</strong></td>
                 ${r.total_pay > 0 ? `<td><strong>${fmtCurrency(r.total_pay)}</strong></td>` : ''}
               </tr>
             </tfoot>
@@ -546,30 +616,46 @@ const app = (() => {
 
   async function loadUsers() {
     try {
-      const users = await api.getUsers();
+      const [users, teams] = await Promise.all([api.getUsers(), api.getTeams()]);
+      teamsList = teams;
       const container = document.getElementById('users-container');
 
       const interns = users.filter(u => u.role === 'intern');
       const managers = users.filter(u => u.role === 'manager');
 
+      function teamOptions(selectedId) {
+        return `<option value="">No team</option>` + teams.map(t =>
+          `<option value="${t.id}"${selectedId === t.id ? ' selected' : ''}>${escapeAttr(t.name)}</option>`
+        ).join('');
+      }
+
       function userRow(u) {
         const isManager = u.role === 'manager';
         return `<tr>
-          <td style="padding:12px 0;border-bottom:1px solid var(--border);">
-            ${u.username}
+          <td style="padding:12px 8px 12px 0;border-bottom:1px solid var(--border);">
+            ${escapeAttr(u.username)}
             <span style="font-size:11px;color:var(--text-muted);margin-left:6px;text-transform:uppercase;">${u.role}</span>
           </td>
-          <td style="padding:12px 0;border-bottom:1px solid var(--border);">
+          <td style="padding:12px 8px 12px 0;border-bottom:1px solid var(--border);">
+            <input type="text" id="title-${u.id}" value="${u.title ? escapeAttr(u.title) : ''}" placeholder="e.g. Backend Engineer"
+              style="width:100%;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;background:var(--surface);color:inherit;" />
+          </td>
+          <td style="padding:12px 8px 12px 0;border-bottom:1px solid var(--border);">
+            <select id="team-${u.id}" style="height:32px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;font-size:13px;">
+              ${teamOptions(u.team_id)}
+            </select>
+          </td>
+          <td style="padding:12px 8px 12px 0;border-bottom:1px solid var(--border);">
             ${!isManager ? `<div style="display:flex;align-items:center;gap:8px;">
               <span style="color:var(--text-muted);">€</span>
               <input type="number" id="rate-${u.id}" value="${u.hourly_rate}" min="0" step="0.5"
-                style="width:90px;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;" />
+                style="width:80px;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;" />
               <span style="font-size:13px;color:var(--text-muted)">/h</span>
             </div>` : '<span style="color:var(--text-muted);font-size:13px;">—</span>'}
           </td>
           <td style="padding:12px 0;border-bottom:1px solid var(--border);text-align:right;">
             <div style="display:flex;gap:6px;justify-content:flex-end;">
-              ${!isManager ? `<button class="btn" onclick="app.saveRate(${u.id})">Save rate</button>` : ''}
+              <button class="btn" onclick="app.saveUserRow(${u.id}, ${!isManager})">Save</button>
               <button class="btn-icon danger" onclick="app.deleteUser(${u.id}, '${u.username}')" title="Delete user">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
               </button>
@@ -581,14 +667,18 @@ const app = (() => {
       container.innerHTML = `
         <div class="create-user-form">
           <h3 style="font-size:14px;font-weight:500;margin-bottom:12px;">Add new user</h3>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;align-items:end;margin-bottom:10px;">
             <div class="form-group">
               <label for="new-username">Username</label>
               <input type="text" id="new-username" placeholder="e.g. john" />
             </div>
             <div class="form-group">
               <label for="new-password">Password</label>
-              <input type="password" id="new-password" placeholder="min. 6 characters" />
+              <input type="password" id="new-password" placeholder="min. 6 characters" autocomplete="new-password" />
+            </div>
+            <div class="form-group">
+              <label for="new-password-confirm">Confirm password</label>
+              <input type="password" id="new-password-confirm" placeholder="Re-enter password" autocomplete="new-password" />
             </div>
             <div class="form-group">
               <label for="new-role">Role</label>
@@ -596,6 +686,16 @@ const app = (() => {
                 <option value="intern">Intern</option>
                 <option value="manager">Manager</option>
               </select>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+            <div class="form-group">
+              <label for="new-title">Title (optional)</label>
+              <input type="text" id="new-title" placeholder="e.g. Backend Engineer" />
+            </div>
+            <div class="form-group">
+              <label for="new-team">Team (optional)</label>
+              <select id="new-team">${teamOptions(null)}</select>
             </div>
             <button class="btn btn-primary" onclick="app.createUser()" style="height:38px;">Create</button>
           </div>
@@ -605,8 +705,10 @@ const app = (() => {
         <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:1rem;">
           <thead>
             <tr>
-              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">User</th>
-              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Hourly rate</th>
+              <th style="text-align:left;padding:8px 8px 8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">User</th>
+              <th style="text-align:left;padding:8px 8px 8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Title</th>
+              <th style="text-align:left;padding:8px 8px 8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Team</th>
+              <th style="text-align:left;padding:8px 8px 8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Hourly rate</th>
               <th style="border-bottom:1px solid var(--border);"></th>
             </tr>
           </thead>
@@ -617,18 +719,45 @@ const app = (() => {
     } catch { alert('Failed to load users.'); }
   }
 
+  async function saveUserRow(userId, hasRate) {
+    const title = document.getElementById(`title-${userId}`).value.trim();
+    const teamRaw = document.getElementById(`team-${userId}`).value;
+    const tasks = [
+      api.updateUserProfile(userId, { title: title || null, team_id: teamRaw ? parseInt(teamRaw, 10) : null })
+    ];
+    if (hasRate) {
+      const rate = parseFloat(document.getElementById(`rate-${userId}`).value);
+      if (isNaN(rate) || rate < 0) { alert('Please enter a valid rate.'); return; }
+      tasks.push(api.setHourlyRate(userId, rate));
+    }
+    try {
+      await Promise.all(tasks);
+      await loadUsers();
+    } catch (err) { alert(err.message || 'Failed to save changes.'); }
+  }
+
   async function createUser() {
     const username = document.getElementById('new-username').value.trim();
     const password = document.getElementById('new-password').value;
+    const passwordConfirm = document.getElementById('new-password-confirm').value;
     const role = document.getElementById('new-role').value;
+    const title = document.getElementById('new-title').value.trim();
+    const teamRaw = document.getElementById('new-team').value;
     const errEl = document.getElementById('create-user-error');
     errEl.textContent = '';
     if (!username || !password) { errEl.textContent = 'Please fill in all fields.'; return; }
     if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+    if (password !== passwordConfirm) { errEl.textContent = 'Passwords do not match.'; return; }
     try {
-      await api.createUser({ username, password, role, hourly_rate: 0 });
+      await api.createUser({
+        username, password, role, hourly_rate: 0,
+        title: title || null,
+        team_id: teamRaw ? parseInt(teamRaw, 10) : null
+      });
       document.getElementById('new-username').value = '';
       document.getElementById('new-password').value = '';
+      document.getElementById('new-password-confirm').value = '';
+      document.getElementById('new-title').value = '';
       await loadUsers();
     } catch (err) { errEl.textContent = err.message; }
   }
@@ -641,18 +770,82 @@ const app = (() => {
     } catch (err) { alert(err.message); }
   }
 
-  async function saveRate(userId) {
-    const input = document.getElementById(`rate-${userId}`);
-    const rate = parseFloat(input.value);
-    if (isNaN(rate) || rate < 0) { alert('Please enter a valid rate.'); return; }
-    try {
-      await api.setHourlyRate(userId, rate);
-      input.style.borderColor = 'var(--success)';
-      setTimeout(() => input.style.borderColor = '', 1500);
-    } catch { alert('Failed to save rate.'); }
-  }
 
   // ── Meeting rooms (manager) ──────────────────────────────────────────────
+
+  // ── Teams (manager) ──────────────────────────────────────────────────────
+
+  async function loadTeams() {
+    try {
+      const teams = await api.getTeams();
+      teamsList = teams;
+      const container = document.getElementById('teams-container');
+      container.innerHTML = `
+        <div class="create-user-form">
+          <h3 style="font-size:14px;font-weight:500;margin-bottom:12px;">Add a team</h3>
+          <div style="display:grid;grid-template-columns:2fr auto;gap:10px;align-items:end;">
+            <div class="form-group">
+              <label for="new-team-name">Name</label>
+              <input type="text" id="new-team-name" placeholder="e.g. Platform" />
+            </div>
+            <button class="btn btn-primary" onclick="app.createTeam()" style="height:38px;">Add</button>
+          </div>
+          <p id="create-team-error" style="font-size:13px;color:var(--danger);margin-top:8px;min-height:18px;"></p>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:1rem;">
+          <tbody>
+            ${teams.length ? teams.map(t => `
+              <tr>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);">
+                  <input type="text" id="team-name-${t.id}" value="${escapeAttr(t.name)}"
+                    style="width:100%;max-width:280px;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;font-size:14px;" />
+                </td>
+                <td style="padding:12px 0;border-bottom:1px solid var(--border);text-align:right;">
+                  <div style="display:flex;gap:6px;justify-content:flex-end;">
+                    <button class="btn" onclick="app.saveTeam(${t.id})">Save</button>
+                    <button class="btn-icon danger" onclick="app.deleteTeam(${t.id}, '${t.name.replace(/'/g, "\\'")}')" title="Delete team">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : `<tr><td style="padding:12px 0;color:var(--text-muted);">No teams configured yet.</td></tr>`}
+          </tbody>
+        </table>`;
+    } catch { alert('Failed to load teams.'); }
+  }
+
+  async function createTeam() {
+    const name = document.getElementById('new-team-name').value.trim();
+    const errEl = document.getElementById('create-team-error');
+    errEl.textContent = '';
+    if (!name) { errEl.textContent = 'Please enter a team name.'; return; }
+    try {
+      await api.createTeam(name);
+      document.getElementById('new-team-name').value = '';
+      await loadTeams();
+      await loadUsers(); // team dropdowns in the users table need the new option
+    } catch (err) { errEl.textContent = err.message; }
+  }
+
+  async function saveTeam(teamId) {
+    const name = document.getElementById(`team-name-${teamId}`).value.trim();
+    if (!name) { alert('Team name cannot be empty.'); return; }
+    try {
+      await api.updateTeam(teamId, name);
+      await loadTeams();
+      await loadUsers();
+    } catch (err) { alert(err.message || 'Failed to update team.'); }
+  }
+
+  async function deleteTeam(teamId, name) {
+    if (!confirm(`Delete team "${name}"? Members will be unassigned, not deleted.`)) return;
+    try {
+      await api.deleteTeam(teamId);
+      await loadTeams();
+      await loadUsers();
+    } catch { alert('Failed to delete team.'); }
+  }
 
   async function loadRooms() {
     try {
@@ -762,6 +955,71 @@ const app = (() => {
       await api.deleteRoom(roomId);
       await loadRooms();
     } catch { alert('Failed to delete room.'); }
+  }
+
+  // ── Clock sessions (manager) ─────────────────────────────────────────────
+
+  async function loadClockSessions() {
+    try {
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const sessions = await api.getClockSessions({
+        date_from: fmt(thirtyDaysAgo), date_to: fmt(now)
+      });
+      const container = document.getElementById('clock-sessions-container');
+      if (!sessions.length) {
+        container.innerHTML = `<p class="card-subtitle">No clock sessions in the last 30 days.</p>`;
+        return;
+      }
+      container.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">User</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Clocked in</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Clocked out</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Hours</th>
+              <th style="text-align:left;padding:8px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">Status</th>
+              <th style="border-bottom:1px solid var(--border);"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sessions.map(s => `
+              <tr${s.auto_closed ? ' style="background:rgba(230,160,60,0.08);"' : ''}>
+                <td style="padding:10px 8px 10px 0;border-bottom:1px solid var(--border);">${escapeAttr(s.username)}</td>
+                <td style="padding:10px 8px 10px 0;border-bottom:1px solid var(--border);">
+                  <input type="datetime-local" id="cs-in-${s.id}" value="${s.clocked_in_at.slice(0, 16)}"
+                    style="height:32px;padding:0 6px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;font-size:12px;" />
+                </td>
+                <td style="padding:10px 8px 10px 0;border-bottom:1px solid var(--border);">
+                  <input type="datetime-local" id="cs-out-${s.id}" value="${s.clocked_out_at ? s.clocked_out_at.slice(0, 16) : ''}"
+                    style="height:32px;padding:0 6px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;font-size:12px;" />
+                </td>
+                <td style="padding:10px 8px 10px 0;border-bottom:1px solid var(--border);">${s.hours != null ? s.hours.toFixed(2) + 'h' : (s.is_active ? '— (active)' : '—')}</td>
+                <td style="padding:10px 8px 10px 0;border-bottom:1px solid var(--border);">
+                  ${s.auto_closed ? '<span class="badge badge-pending">Auto-closed</span>' : (s.is_active ? '<span class="badge badge-other">Active</span>' : '<span class="badge badge-approved">Settled</span>')}
+                </td>
+                <td style="padding:10px 0;border-bottom:1px solid var(--border);text-align:right;">
+                  <button class="btn" onclick="app.saveClockSession(${s.id})">Save</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    } catch { alert('Failed to load clock sessions.'); }
+  }
+
+  async function saveClockSession(id) {
+    const inRaw = document.getElementById(`cs-in-${id}`).value;
+    const outRaw = document.getElementById(`cs-out-${id}`).value;
+    if (!inRaw) { alert('Clock-in time is required.'); return; }
+    try {
+      await api.updateClockSession(id, {
+        clocked_in_at: inRaw + ':00',
+        clocked_out_at: outRaw ? outRaw + ':00' : null
+      });
+      await loadClockSessions();
+    } catch (err) { alert(err.message || 'Failed to update clock session.'); }
   }
 
   // ── Meetings ──────────────────────────────────────────────────────────────
@@ -1152,7 +1410,8 @@ const app = (() => {
     openEdit, closeModal, saveEdit,
     loadEntries, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
-    loadUsers, createUser, deleteUser, saveRate,
+    loadUsers, createUser, deleteUser, saveUserRow,
+    loadTeams, createTeam, saveTeam, deleteTeam,
     loadRooms, createRoom, saveRoom, deleteRoom, loadMeetingsRoomAvailability,
     scheduleMeeting, cancelMeeting, respondToMeeting, declineMeeting, saveMyEmail,
     toggleMeetingLocation, toggleGoogleMeetOption,

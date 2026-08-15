@@ -322,6 +322,115 @@ def send_meeting_reminder(to_email: str, recipient_name: str, title: str,
     _send(to_email, f"Starting soon: {title} @ {start_time}", html, text)
 
 
+RECURRENCE_LABELS = {"daily": "Daily", "weekly": "Weekly", "biweekly": "Every 2 weeks", "monthly": "Monthly"}
+
+
+def send_recurring_series_invite(to_email: str, attendee_name: str, organizer_name: str,
+                                  title: str, first_date: str, start_time: str, end_time: str,
+                                  description: str, rsvp_token: str,
+                                  location_type: str = "online", room: str = None,
+                                  meeting_link: str = None, guests: list = None,
+                                  recurrence: str = "daily", recurrence_until: str = None,
+                                  occurrence_count: int = 1, recurrence_group_id: str = None,
+                                  organizer_email: str = None, attendee_emails: list = None) -> None:
+    """
+    One invite per attendee for an entire recurring series — not one per
+    occurrence. Every occurrence's attendee row shares this same rsvp_token
+    for this attendee, so a single Accept/Decline click here applies to the
+    whole series at once (fine-tuning a single occurrence later is still
+    possible from inside the app).
+    """
+    accept_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=accept"
+    decline_url = f"{BASE_URL}/meetings/rsvp?token={rsvp_token}&action=decline"
+    recurrence_label = RECURRENCE_LABELS.get(recurrence, recurrence)
+
+    card_html, location_text, guest_lines = _build_card_html(
+        title, first_date, start_time, end_time, description, location_type, room,
+        meeting_link, organizer_name, guests
+    )
+
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
+      <p style="font-size:13px;color:#1a73e8;background:#e8f0fe;padding:8px 12px;
+                border-radius:6px;margin-bottom:14px;">
+        🔁 {recurrence_label} — {occurrence_count} occurrences{f', through {recurrence_until}' if recurrence_until else ''}
+      </p>
+      {card_html}
+      <p style="font-size:13px;color:#5f6368;margin:16px 0 8px;">
+        Responding applies to all {occurrence_count} occurrences in this series — reply for {to_email}
+      </p>
+      <table cellpadding="0" cellspacing="0"><tr>
+        <td style="padding-right: 8px;">{_pill_button("Yes", accept_url, "#1a73e8")}</td>
+        <td>{_pill_button("No", decline_url, "#5f6368")}</td>
+      </tr></table>
+      <p style="color:#999;font-size:12px;margin-top:20px;">
+        You can also respond from inside the Timesheet App, including changing your
+        response for just a single occurrence later. A recurring calendar invite (.ics) is attached.
+      </p>
+    </div>
+    </body></html>
+    """
+    text = (
+        f"{title} — {recurrence_label}, {occurrence_count} occurrences\n"
+        f"First: {first_date}, {start_time} - {end_time}\n"
+        f"{location_text}\n\n"
+        f"{description or ''}\n\n"
+        f"Guests:\n{guest_lines}\n\n"
+        f"Responding applies to all occurrences.\n"
+        f"Yes: {accept_url}\nNo: {decline_url}\n"
+    )
+    ics_content = None
+    if recurrence_group_id:
+        ics_content = ics_utils.build_ics(
+            meeting_id=recurrence_group_id, sequence=0, title=title, description=description,
+            date=first_date, start_time=start_time, end_time=end_time,
+            organizer_email=organizer_email, organizer_name=organizer_name,
+            attendee_emails=attendee_emails or [], location_text=location_text,
+            rrule=ics_utils.build_rrule(recurrence, recurrence_until)
+        )
+    _send(to_email, f"Invitation (repeats {recurrence_label.lower()}): {title} @ {first_date} {start_time}",
+          html, text, ics_content=ics_content)
+
+
+def send_organizer_series_confirmation(to_email: str, organizer_name: str,
+                                        title: str, first_date: str, start_time: str, end_time: str,
+                                        description: str, location_type: str = "online",
+                                        room: str = None, meeting_link: str = None,
+                                        guests: list = None, recurrence: str = "daily",
+                                        recurrence_until: str = None, occurrence_count: int = 1) -> None:
+    """The organizer's own copy for a recurring series — one email, not one per occurrence."""
+    recurrence_label = RECURRENCE_LABELS.get(recurrence, recurrence)
+    card_html, location_text, guest_lines = _build_card_html(
+        title, first_date, start_time, end_time, description, location_type, room,
+        meeting_link, organizer_name, guests
+    )
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head><body>
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
+      <p style="font-size:13px;color:#1a73e8;background:#e8f0fe;padding:8px 12px;
+                border-radius:6px;margin-bottom:14px;">
+        🔁 You scheduled a {recurrence_label.lower()} series — {occurrence_count} occurrences{f', through {recurrence_until}' if recurrence_until else ''}
+      </p>
+      {card_html}
+      <p style="font-size:13px;color:#5f6368;margin:16px 0 0;">
+        You're the organizer — this is your copy for quick access, covering the whole series.
+      </p>
+    </div>
+    </body></html>
+    """
+    text = (
+        f"You scheduled: {title} — {recurrence_label}, {occurrence_count} occurrences\n"
+        f"First: {first_date}, {start_time} - {end_time}\n"
+        f"{location_text}\n\n"
+        f"{description or ''}\n\n"
+        f"Guests:\n{guest_lines}\n"
+    )
+    _send(to_email, f"Scheduled (repeats {recurrence_label.lower()}): {title} @ {first_date} {start_time}", html, text)
+
+
 def send_organizer_confirmation(to_email: str, organizer_name: str,
                                  title: str, date: str, start_time: str, end_time: str,
                                  description: str, location_type: str = "online",

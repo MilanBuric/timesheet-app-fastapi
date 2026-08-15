@@ -23,13 +23,17 @@ const meetings = (() => {
       container.innerHTML = '<p class="attendees-empty">No other users to invite yet.</p>';
       return;
     }
-    container.innerHTML = options.map(u => `
+    container.innerHTML = options.map(u => {
+      const detail = [u.title, u.team_name].filter(Boolean).join(' · ');
+      return `
       <label class="attendee-chip">
         <input type="checkbox" value="${u.id}" />
         <span>${u.username}</span>
+        ${detail ? `<span class="attendee-detail">${escapeHtml(detail)}</span>` : ''}
         <span class="attendee-role">${u.role}</span>
       </label>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function getSelectedAttendees() {

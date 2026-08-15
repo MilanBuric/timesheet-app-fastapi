@@ -812,6 +812,12 @@ svg { display: block; flex-shrink: 0; }
   color: var(--text-muted);
 }
 
+.attendee-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .meeting-card {
   padding: 1rem 1.25rem;
   border: 1px solid var(--border);

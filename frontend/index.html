@@ -159,15 +159,16 @@
           </div>
         </div>
         <div class="card intern-only">
-          <h2 class="card-title">Log an entry</h2>
+          <h2 class="card-title">Log a task</h2>
+          <p class="card-subtitle">Pay is calculated from clocking in/out, not from this log. This is a record of what you worked on, for review — the time estimate below is informational only.</p>
           <div class="form-grid">
             <div class="form-group">
               <label for="entry-date">Date</label>
               <input type="date" id="entry-date" />
             </div>
             <div class="form-group">
-              <label for="entry-hours">Hours</label>
-              <input type="number" id="entry-hours" min="0.5" max="24" step="0.5" placeholder="e.g. 2.5" />
+              <label for="entry-hours">Est. time spent</label>
+              <input type="number" id="entry-hours" min="0.01" max="24" step="0.01" placeholder="e.g. 2.5" />
             </div>
             <div class="form-group">
               <label for="entry-category">Category</label>
@@ -183,7 +184,7 @@
             </div>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary" onclick="app.addEntry()">Add entry</button>
+            <button class="btn btn-primary" onclick="app.addEntry()">Log task</button>
           </div>
         </div>
         <div class="card">
@@ -405,13 +406,24 @@
       <!-- Users view (manager only) -->
       <section id="view-users" class="hidden">
         <div class="card">
-          <h2 class="card-title">Intern hourly rates</h2>
+          <h2 class="card-title">Employees</h2>
+          <p class="card-subtitle">Set each person's title, team, and (for interns) hourly rate. Title and team are shown next to names when scheduling a meeting.</p>
           <div id="users-container"></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Teams</h2>
+          <p class="card-subtitle">Teams configured here are assignable to any employee above, and group people consistently for org clarity.</p>
+          <div id="teams-container"></div>
         </div>
         <div class="card">
           <h2 class="card-title">Meeting rooms</h2>
           <p class="card-subtitle">Rooms configured here show up as suggestions (with capacity/equipment) when scheduling an in-person meeting.</p>
           <div id="rooms-container"></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Clock sessions</h2>
+          <p class="card-subtitle">Pay is calculated entirely from these — clocking in/out, not task logs. Sessions flagged "Auto-closed" mean someone likely forgot to clock out; review and correct them here.</p>
+          <div id="clock-sessions-container"></div>
         </div>
       </section>
     </main>

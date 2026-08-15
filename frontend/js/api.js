@@ -81,6 +81,44 @@ const api = (() => {
     return res.json();
   }
 
+  async function updateUserProfile(userId, data) {
+    const res = await request('PATCH', `/users/${userId}/profile`, data);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update profile');
+    }
+    return res.json();
+  }
+
+  async function getTeams() {
+    const res = await request('GET', '/teams');
+    if (!res.ok) throw new Error('Failed to fetch teams');
+    return res.json();
+  }
+
+  async function createTeam(name) {
+    const res = await request('POST', '/teams', { name });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to add team');
+    }
+    return res.json();
+  }
+
+  async function updateTeam(id, name) {
+    const res = await request('PATCH', `/teams/${id}`, { name });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update team');
+    }
+    return res.json();
+  }
+
+  async function deleteTeam(id) {
+    const res = await request('DELETE', `/teams/${id}`);
+    if (!res.ok) throw new Error('Failed to delete team');
+  }
+
   async function getEntries(params = {}) {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)));
     const res = await request('GET', `/entries?${qs}`);
@@ -202,6 +240,22 @@ const api = (() => {
     return res.json();
   }
 
+  async function getClockSessions(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const res = await request('GET', `/clock-sessions${query ? '?' + query : ''}`);
+    if (!res.ok) throw new Error('Failed to fetch clock sessions');
+    return res.json();
+  }
+
+  async function updateClockSession(id, data) {
+    const res = await request('PATCH', `/clock-sessions/${id}`, data);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update clock session');
+    }
+    return res.json();
+  }
+
   async function forgotPassword(username) {
     const res = await fetch('/auth/forgot-password', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -264,13 +318,15 @@ const api = (() => {
 
   return {
     login, logout, me, getToken,
-    getUsers, createUser, deleteUser, setHourlyRate,
+    getUsers, createUser, deleteUser, setHourlyRate, updateUserProfile,
+    getTeams, createTeam, updateTeam, deleteTeam,
     getEntries, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
     getStats, getWeeklyReport,
     clockIn, clockOut, getActiveSession,
     getBasicUsers, getMeetings, createMeeting, deleteMeeting, deleteMeetingSeries,
     rescheduleMeeting, rsvpMeeting, updateMyEmail,
     getRooms, createRoom, updateRoom, deleteRoom, getRoomOccupancy,
+    getClockSessions, updateClockSession,
     forgotPassword, resetPassword
   };
 })();

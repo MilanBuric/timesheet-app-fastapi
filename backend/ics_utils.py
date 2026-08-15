@@ -37,11 +37,30 @@ def _fold(line: str) -> str:
     return "\r\n".join(out)
 
 
-def build_ics(meeting_id: int, sequence: int, title: str, description: str,
+RECURRENCE_FREQ = {"daily": "DAILY", "weekly": "WEEKLY", "biweekly": "WEEKLY", "monthly": "MONTHLY"}
+
+
+def build_rrule(recurrence: str, until: str) -> str:
+    """Maps our recurrence vocabulary to an RFC 5545 RRULE string, e.g.
+    FREQ=WEEKLY;INTERVAL=2;UNTIL=20261231T235959Z. Returns None for a
+    non-recurring meeting."""
+    freq = RECURRENCE_FREQ.get(recurrence)
+    if not freq:
+        return None
+    parts = [f"FREQ={freq}"]
+    if recurrence == "biweekly":
+        parts.append("INTERVAL=2")
+    if until:
+        parts.append(f"UNTIL={until.replace('-', '')}T235959Z")
+    return ";".join(parts)
+
+
+def build_ics(meeting_id, sequence: int, title: str, description: str,
               date: str, start_time: str, end_time: str,
               organizer_email: str, organizer_name: str,
               attendee_emails: list, location_text: str,
-              method: str = "REQUEST", status: str = "CONFIRMED") -> str:
+              method: str = "REQUEST", status: str = "CONFIRMED",
+              rrule: str = None) -> str:
     dtstart = datetime.strptime(f"{date} {start_time}", "%Y-%m-%d %H:%M").strftime("%Y%m%dT%H%M%S")
     dtend = datetime.strptime(f"{date} {end_time}", "%Y-%m-%d %H:%M").strftime("%Y%m%dT%H%M%S")
     dtstamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -62,6 +81,8 @@ def build_ics(meeting_id: int, sequence: int, title: str, description: str,
         f"SUMMARY:{_escape(title)}",
         f"STATUS:{status}",
     ]
+    if rrule:
+        lines.append(f"RRULE:{rrule}")
     if description:
         lines.append(f"DESCRIPTION:{_escape(description)}")
     if location_text:

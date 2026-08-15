@@ -73,6 +73,9 @@ class UserResponse(BaseModel):
     role: str
     hourly_rate: float
     email: Optional[str] = None
+    title: Optional[str] = None
+    team_id: Optional[int] = None
+    team_name: Optional[str] = None
 
 
 class UpdateEmailRequest(BaseModel):
@@ -83,11 +86,31 @@ class UpdateRateRequest(BaseModel):
     hourly_rate: float = Field(..., ge=0)
 
 
+class UpdateUserProfileRequest(BaseModel):
+    title: Optional[str] = Field(None, max_length=100)
+    team_id: Optional[int] = None
+
+
 class CreateUserRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6)
     role: str = Field(..., pattern="^(intern|manager)$")
     hourly_rate: float = Field(0.0, ge=0)
+    title: Optional[str] = Field(None, max_length=100)
+    team_id: Optional[int] = None
+
+
+class TeamCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class TeamUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class TeamResponse(BaseModel):
+    id: int
+    name: str
 
 
 class WeeklyReportDay(BaseModel):
@@ -116,6 +139,24 @@ class BasicUser(BaseModel):
     id: int
     username: str
     role: str
+    title: Optional[str] = None
+    team_name: Optional[str] = None
+
+
+class ClockSessionResponse(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    clocked_in_at: str
+    clocked_out_at: Optional[str] = None
+    is_active: bool
+    auto_closed: bool
+    hours: Optional[float] = None
+
+
+class ClockSessionUpdate(BaseModel):
+    clocked_in_at: Optional[str] = None
+    clocked_out_at: Optional[str] = None
 
 
 class AttendeeInfo(BaseModel):
