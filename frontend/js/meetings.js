@@ -23,25 +23,77 @@ const meetings = (() => {
       container.innerHTML = '<p class="attendees-empty">No other users to invite yet.</p>';
       return;
     }
-    container.innerHTML = options.map(u => {
+
+    const teams = {}; // team_id -> { name, members: [] }
+    const noTeam = [];
+    options.forEach(u => {
+      if (u.team_id) {
+        if (!teams[u.team_id]) teams[u.team_id] = { name: u.team_name, members: [] };
+        teams[u.team_id].members.push(u);
+      } else {
+        noTeam.push(u);
+      }
+    });
+
+    function memberChip(u) {
       const detail = [u.title, u.team_name].filter(Boolean).join(' · ');
       return `
       <label class="attendee-chip">
-        <input type="checkbox" value="${u.id}" />
-        <span>${u.username}</span>
+        <input type="checkbox" data-user-id="${u.id}" onchange="meetings.syncTeamCheckbox(this)" />
+        <span>${escapeHtml(u.username)}</span>
         ${detail ? `<span class="attendee-detail">${escapeHtml(detail)}</span>` : ''}
         <span class="attendee-role">${u.role}</span>
       </label>
     `;
-    }).join('');
+    }
+
+    const hasTeams = Object.keys(teams).length > 0;
+    let html = Object.entries(teams).map(([teamId, t]) => `
+      <div class="team-group">
+        <label class="team-chip">
+          <input type="checkbox" data-team-id="${teamId}" onchange="meetings.toggleTeamMembers(this)" />
+          <span>👥 ${escapeHtml(t.name)}</span>
+          <span class="attendee-role">${t.members.length}</span>
+        </label>
+        <div class="team-members">${t.members.map(memberChip).join('')}</div>
+      </div>
+    `).join('');
+
+    if (noTeam.length) {
+      html += hasTeams
+        ? `<div class="team-group"><span class="team-group-label">No team</span><div class="team-members">${noTeam.map(memberChip).join('')}</div></div>`
+        : `<div class="team-members">${noTeam.map(memberChip).join('')}</div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  function toggleTeamMembers(teamCheckbox) {
+    const group = teamCheckbox.closest('.team-group');
+    group.querySelectorAll('input[data-user-id]').forEach(cb => { cb.checked = teamCheckbox.checked; });
+    teamCheckbox.indeterminate = false;
+  }
+
+  function syncTeamCheckbox(memberCheckbox) {
+    const group = memberCheckbox.closest('.team-group');
+    const teamCheckbox = group && group.querySelector('input[data-team-id]');
+    if (!teamCheckbox) return; // "No team" group has no select-all checkbox
+    const members = Array.from(group.querySelectorAll('input[data-user-id]'));
+    const checkedCount = members.filter(m => m.checked).length;
+    teamCheckbox.checked = checkedCount === members.length;
+    teamCheckbox.indeterminate = checkedCount > 0 && checkedCount < members.length;
   }
 
   function getSelectedAttendees() {
-    return Array.from(document.querySelectorAll('#meeting-attendees-list input:checked')).map(el => parseInt(el.value, 10));
+    return Array.from(document.querySelectorAll('#meeting-attendees-list input[data-user-id]:checked'))
+      .map(el => parseInt(el.dataset.userId, 10));
   }
 
   function clearAttendeeSelection() {
-    document.querySelectorAll('#meeting-attendees-list input:checked').forEach(el => el.checked = false);
+    document.querySelectorAll('#meeting-attendees-list input').forEach(el => {
+      el.checked = false;
+      el.indeterminate = false;
+    });
   }
 
   function statusBadge(status) {
@@ -190,6 +242,6 @@ const meetings = (() => {
 
   return {
     renderAttendeeOptions, getSelectedAttendees, clearAttendeeSelection, renderList, renderCalendar,
-    formatDate, getMeetingById, setRooms, renderSearchResults
+    formatDate, getMeetingById, setRooms, renderSearchResults, toggleTeamMembers, syncTeamCheckbox
   };
 })();

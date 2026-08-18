@@ -129,9 +129,13 @@
         </div>
       </div>
     </aside>
+    <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
 
     <main class="main">
       <header class="topbar">
+        <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Open menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
         <div>
           <h1 id="view-title">Dashboard</h1>
           <p id="today-label" class="topbar-date"></p>
@@ -226,6 +230,7 @@
           </div>
           <div id="entries-summary" class="entries-summary hidden"></div>
           <div id="all-entries-container"></div>
+          <div id="entries-pagination" class="entries-pagination"></div>
         </div>
       </section>
 
@@ -307,10 +312,12 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
-          <div class="calendar-weekdays">
-            <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+          <div class="calendar-scroll-wrap">
+            <div class="calendar-weekdays">
+              <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+            </div>
+            <div id="calendar-grid" class="calendar-grid"></div>
           </div>
-          <div id="calendar-grid" class="calendar-grid"></div>
         </div>
 
         <div class="panel-overlay hidden" id="meeting-panel-overlay" onclick="app.closeMeetingPanel()"></div>
@@ -335,16 +342,16 @@
                 </div>
                 <div class="form-group">
                   <label for="meeting-date">Date</label>
-                  <input type="date" id="meeting-date" />
+                  <input type="date" id="meeting-date" onchange="app.checkAttendeeConflictsLive()" />
                 </div>
                 <div class="form-row-2">
                   <div class="form-group">
                     <label for="meeting-start">Start time</label>
-                    <input type="time" id="meeting-start" />
+                    <input type="time" id="meeting-start" onchange="app.checkAttendeeConflictsLive()" />
                   </div>
                   <div class="form-group">
                     <label for="meeting-end">End time</label>
-                    <input type="time" id="meeting-end" />
+                    <input type="time" id="meeting-end" onchange="app.checkAttendeeConflictsLive()" />
                   </div>
                 </div>
                 <div class="form-group">
@@ -393,7 +400,8 @@
                 </div>
                 <div class="form-group">
                   <label>Attendees</label>
-                  <div id="meeting-attendees-list" class="attendees-list"></div>
+                  <div id="meeting-attendees-list" class="attendees-list" onchange="app.checkAttendeeConflictsLive()"></div>
+                  <div id="attendee-conflict-warning"></div>
                 </div>
               </div>
               <div class="form-actions">

@@ -522,6 +522,113 @@ svg { display: block; flex-shrink: 0; }
   margin: 1.5rem 0 1rem;
 }
 
+/* ── Mobile responsiveness ───────────────────────────────────────────────── */
+
+.sidebar-toggle-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 150;
+}
+
+@media (max-width: 768px) {
+  /* Sidebar becomes an off-canvas drawer instead of permanently eating
+     220px of a phone-width viewport. */
+  .sidebar-toggle-btn { display: inline-flex; }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 200;
+    width: 260px;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+
+  .main {
+    margin-left: 0;
+    padding: 1rem;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .topbar h1 { font-size: 19px; }
+
+  /* Grids that assumed desktop width collapse to a single column. */
+  .stats-grid,
+  .form-grid,
+  .form-row-2,
+  .report-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    padding: 1.1rem;
+    overflow-x: auto; /* management tables (Users/Teams/Rooms/Clock sessions)
+                          scroll horizontally instead of squashing unreadably */
+  }
+  .card table { min-width: 540px; }
+
+  /* Inline-styled multi-column grids in the manager forms (add user/team/
+     room) are generated in app.js as direct div children of this wrapper
+     class — overriding with !important is the sanctioned way to beat an
+     inline style without a JS refactor. */
+  .create-user-form > div {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* The month calendar keeps real, tappable cell sizes instead of
+     squeezing 7 columns into a phone's width — it scrolls horizontally
+     while the month-nav header above it stays put. */
+  .calendar-scroll-wrap {
+    overflow-x: auto;
+  }
+  .calendar-weekdays,
+  .calendar-grid {
+    min-width: 620px;
+  }
+  .calendar-grid { grid-auto-rows: 110px; }
+
+  /* The day panel becomes a full-screen takeover rather than a narrow
+     side sliver — 92vw of a 375px phone is only ~345px, too cramped for
+     the schedule form's fields. */
+  .meeting-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+  .meeting-panel-body { padding: 1.25rem; }
+
+  .modal {
+    width: 100%;
+    padding: 1.25rem;
+  }
+
+  .login-card { padding: 1.5rem; }
+}
+
+@media (max-width: 480px) {
+  /* Extra-narrow phones: drop to a smaller type scale so nothing wraps mid-word. */
+  .stat-value { font-size: 22px; }
+  .card-title { font-size: 14px; }
+  body { font-size: 14px; }
+}
+
 /* ── Print / PDF styles ──────────────────────────────────────────────────── */
 
 @media print {
@@ -799,6 +906,42 @@ svg { display: block; flex-shrink: 0; }
   transition: border-color 0.15s, background 0.15s;
 }
 
+.team-group {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.team-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  margin-bottom: 6px;
+}
+
+.team-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 18px;
+}
+
+.team-group-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
 .attendee-chip:has(input:checked) {
   border-color: var(--accent);
   background: var(--accent-bg);
@@ -816,6 +959,38 @@ svg { display: block; flex-shrink: 0; }
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
+}
+
+.conflict-warning {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.entries-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pagination-page {
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .meeting-card {

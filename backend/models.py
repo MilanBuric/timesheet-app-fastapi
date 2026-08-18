@@ -140,6 +140,7 @@ class BasicUser(BaseModel):
     username: str
     role: str
     title: Optional[str] = None
+    team_id: Optional[int] = None
     team_name: Optional[str] = None
 
 
@@ -251,3 +252,4 @@ class MeetingResponse(BaseModel):
     series_count: Optional[int] = None
     skipped_dates: Optional[list[str]] = None
     ics_sequence: int = 0
+    attendee_conflicts: Optional[list] = None

@@ -126,6 +126,15 @@ const api = (() => {
     return res.json();
   }
 
+  async function getEntriesPaginated(params = {}) {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v || v === 0)));
+    const res = await request('GET', `/entries?${qs}`);
+    if (!res.ok) throw new Error('Failed to fetch entries');
+    const data = await res.json();
+    const total = parseInt(res.headers.get('X-Total-Count'), 10);
+    return { data, total: isNaN(total) ? data.length : total };
+  }
+
   async function createEntry(data) {
     const res = await request('POST', '/entries', data);
     if (res.status === 409) {
@@ -180,6 +189,13 @@ const api = (() => {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Failed to schedule meeting');
     }
+    return res.json();
+  }
+
+  async function checkMeetingConflicts(params) {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)));
+    const res = await request('GET', `/meetings/check-conflicts?${qs}`);
+    if (!res.ok) throw new Error('Failed to check conflicts');
     return res.json();
   }
 
@@ -320,10 +336,10 @@ const api = (() => {
     login, logout, me, getToken,
     getUsers, createUser, deleteUser, setHourlyRate, updateUserProfile,
     getTeams, createTeam, updateTeam, deleteTeam,
-    getEntries, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
+    getEntries, getEntriesPaginated, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
     getStats, getWeeklyReport,
     clockIn, clockOut, getActiveSession,
-    getBasicUsers, getMeetings, createMeeting, deleteMeeting, deleteMeetingSeries,
+    getBasicUsers, getMeetings, createMeeting, checkMeetingConflicts, deleteMeeting, deleteMeetingSeries,
     rescheduleMeeting, rsvpMeeting, updateMyEmail,
     getRooms, createRoom, updateRoom, deleteRoom, getRoomOccupancy,
     getClockSessions, updateClockSession,

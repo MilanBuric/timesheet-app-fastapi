@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Form, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Form, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -28,6 +28,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
 FRONTEND_PATH = Path(__file__).parent.parent / "frontend"
@@ -194,7 +195,7 @@ def get_basic_users(current_user=Depends(get_current_user)):
     so people can tell who's who beyond just a username and access role."""
     with get_connection() as conn:
         rows = conn.execute(
-            """SELECT u.id, u.username, u.role, u.title, t.name as team_name
+            """SELECT u.id, u.username, u.role, u.title, u.team_id, t.name as team_name
                FROM users u LEFT JOIN teams t ON u.team_id = t.id
                ORDER BY u.role, u.username"""
         ).fetchall()
@@ -299,9 +300,12 @@ def _get_clocked_hours_by_day(conn, user_id: int, date_from: str, date_to: str) 
 
 @app.get("/entries", response_model=list[EntryResponse])
 def get_entries(
+    response: Response,
     date_from: str = None,
     date_to: str = None,
     category: str = None,
+    limit: int = None,
+    offset: int = 0,
     current_user=Depends(get_current_user)
 ):
     query = "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE 1=1"
@@ -318,10 +322,19 @@ def get_entries(
     if category:
         query += " AND e.category = ?"
         params.append(category)
+
+    count_query = query.replace("SELECT e.*, u.username", "SELECT COUNT(*)", 1)
+
     query += " ORDER BY e.date DESC, e.created_at DESC"
+    query_params = params
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        query_params = params + [limit, offset]
 
     with get_connection() as conn:
-        rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+        total = conn.execute(count_query, params).fetchone()[0]
+        response.headers["X-Total-Count"] = str(total)
+        rows = [dict(r) for r in conn.execute(query, query_params).fetchall()]
         for row in rows:
             row["overtime"] = get_daily_total(conn, row["user_id"], row["date"]) > 8
     return rows
@@ -888,6 +901,52 @@ def _rooms_overlap(conn, date: str, start_time: str, end_time: str, room: str, e
     return conn.execute(query, params).fetchone() is not None
 
 
+def _get_attendee_conflicts(conn, date: str, start_time: str, end_time: str,
+                             attendee_ids: list, exclude_meeting_id: int = None) -> list:
+    """Unlike room conflicts, a person being double-booked isn't a hard
+    impossibility — it might be intentional (they're picking which to
+    prioritize). So this returns info for the caller to show as a warning,
+    rather than raising. A declined invite doesn't count as a conflict —
+    if they're not actually going, there's nothing to warn about."""
+    if not attendee_ids:
+        return []
+    conflicts = []
+    for uid in set(attendee_ids):
+        query = """SELECT m.id, m.title, m.start_time, m.end_time, u.username FROM meetings m
+                   JOIN users u ON u.id = ?
+                   WHERE m.date = ? AND NOT (m.end_time <= ? OR m.start_time >= ?)
+                     AND (
+                       m.organizer_id = ?
+                       OR EXISTS (
+                         SELECT 1 FROM meeting_attendees ma
+                         WHERE ma.meeting_id = m.id AND ma.user_id = ? AND ma.status != 'declined'
+                       )
+                     )"""
+        params = [uid, date, start_time, end_time, uid, uid]
+        if exclude_meeting_id is not None:
+            query += " AND m.id != ?"
+            params.append(exclude_meeting_id)
+        rows = conn.execute(query, params).fetchall()
+        for r in rows:
+            conflicts.append({
+                "user_id": uid, "username": r["username"], "meeting_title": r["title"],
+                "date": date, "start_time": r["start_time"], "end_time": r["end_time"]
+            })
+    return conflicts
+
+
+@app.get("/meetings/check-conflicts")
+def check_meeting_conflicts(date: str, start_time: str, end_time: str,
+                             attendee_ids: str = "", exclude_meeting_id: int = None,
+                             current_user=Depends(get_current_user)):
+    """Live check the scheduling form calls as the organizer picks attendees
+    and a time, so a conflict shows up before they commit — not just as a
+    surprise after the meeting's already been created."""
+    ids = [int(x) for x in attendee_ids.split(",") if x.strip().isdigit()]
+    with get_connection() as conn:
+        return {"conflicts": _get_attendee_conflicts(conn, date, start_time, end_time, ids, exclude_meeting_id)}
+
+
 RECURRENCE_STEP_DAYS = {"daily": 1, "weekly": 7, "biweekly": 14}
 MAX_RECURRENCE_OCCURRENCES = 52  # safety cap so a bad end date can't spawn hundreds of rows
 
@@ -1148,6 +1207,22 @@ def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, curre
 
     result["series_count"] = len(created_ids) if recurrence_group_id else None
     result["skipped_dates"] = skipped_dates or None
+
+    if attendee_tokens:
+        seen = set()
+        all_conflicts = []
+        with get_connection() as conn:
+            for meeting_id, occurrence_date, _invitees in created_ids:
+                for c in _get_attendee_conflicts(
+                    conn, occurrence_date, body.start_time, body.end_time,
+                    list(attendee_tokens.keys()), exclude_meeting_id=meeting_id
+                ):
+                    key = (c["user_id"], c["date"], c["start_time"], c["end_time"], c["meeting_title"])
+                    if key not in seen:
+                        seen.add(key)
+                        all_conflicts.append(c)
+        result["attendee_conflicts"] = all_conflicts or None
+
     return result
 
 

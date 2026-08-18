@@ -1,6 +1,8 @@
 const app = (() => {
   let currentUser = null;
   let allEntries = [];
+  let entriesPage = 1;
+  const ENTRIES_PAGE_SIZE = 20;
   let reportPeriod = 'week';
   let reportOffset = 0;
   let currentReport = null;
@@ -66,6 +68,7 @@ const app = (() => {
     // Drop every cached render/fetch result from the previous session —
     // the next login re-fetches everything fresh and role-scoped.
     allEntries = [];
+    entriesPage = 1;
     reportPeriod = 'week';
     reportOffset = 0;
     currentReport = null;
@@ -210,6 +213,7 @@ const app = (() => {
         if (view === 'meetings') { loadMeetingsView(); startMeetingsPolling(); }
         else { stopMeetingsPolling(); }
         if (view === 'users') { loadUsers(); loadTeams(); loadRooms(); loadClockSessions(); }
+        closeSidebar(); // on mobile the drawer should close after picking a destination
       });
     });
     // A colleague's RSVP (from the emailed link, or another session) doesn't
@@ -219,6 +223,22 @@ const app = (() => {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && meetingsViewActive) refreshCalendarResilient();
     });
+
+    // Mobile sidebar drawer — the hamburger button and its own overlay only
+    // do anything visually once the <=768px CSS breakpoint applies, but the
+    // listeners are harmless to attach unconditionally either way.
+    document.getElementById('sidebar-toggle').addEventListener('click', toggleSidebar);
+    document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar);
+  }
+
+  function toggleSidebar() {
+    document.querySelector('.sidebar').classList.toggle('mobile-open');
+    document.getElementById('sidebar-overlay').classList.toggle('hidden');
+  }
+
+  function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('mobile-open');
+    document.getElementById('sidebar-overlay').classList.add('hidden');
   }
 
   function startMeetingsPolling() {
@@ -253,16 +273,51 @@ const app = (() => {
   }
 
   async function loadEntries() {
+    entriesPage = 1;
+    await fetchAndRenderEntries();
+  }
+
+  async function goToEntriesPage(page) {
+    entriesPage = page;
+    await fetchAndRenderEntries();
+  }
+
+  async function fetchAndRenderEntries() {
     try {
-      const params = {
+      const filters = {
         date_from: document.getElementById('filter-from').value,
         date_to: document.getElementById('filter-to').value,
         category: document.getElementById('filter-category').value,
       };
-      allEntries = await api.getEntries(params);
-      entries.renderTable(allEntries, 'all-entries-container', currentUser.role === 'manager');
-      renderEntriesSummary(allEntries);
+      // The table is paginated (so a large history never dumps hundreds of
+      // rows into the DOM at once), but the summary line above it always
+      // reflects the FULL filtered set, not just the current page — so
+      // "Total: 84h" stays true regardless of which page you're looking at.
+      const [page, full] = await Promise.all([
+        api.getEntriesPaginated({ ...filters, limit: ENTRIES_PAGE_SIZE, offset: (entriesPage - 1) * ENTRIES_PAGE_SIZE }),
+        api.getEntries(filters)
+      ]);
+      allEntries = full;
+      entries.renderTable(page.data, 'all-entries-container', currentUser.role === 'manager');
+      renderEntriesSummary(full);
+      renderEntriesPagination(page.total);
     } catch (err) { console.error(err); }
+  }
+
+  function renderEntriesPagination(total) {
+    const el = document.getElementById('entries-pagination');
+    if (!el) return;
+    const totalPages = Math.max(1, Math.ceil(total / ENTRIES_PAGE_SIZE));
+    if (totalPages <= 1) { el.innerHTML = ''; return; }
+    const start = (entriesPage - 1) * ENTRIES_PAGE_SIZE + 1;
+    const end = Math.min(entriesPage * ENTRIES_PAGE_SIZE, total);
+    el.innerHTML = `
+      <span class="pagination-info">${start}–${end} of ${total}</span>
+      <div class="pagination-controls">
+        <button class="btn" ${entriesPage <= 1 ? 'disabled' : ''} onclick="app.goToEntriesPage(${entriesPage - 1})">‹ Prev</button>
+        <span class="pagination-page">Page ${entriesPage} of ${totalPages}</span>
+        <button class="btn" ${entriesPage >= totalPages ? 'disabled' : ''} onclick="app.goToEntriesPage(${entriesPage + 1})">Next ›</button>
+      </div>`;
   }
 
   function renderEntriesSummary(data) {
@@ -1298,16 +1353,58 @@ const app = (() => {
     meetings.clearAttendeeSelection();
     // Jump the calendar to the newly-scheduled date so the new meeting
     // is immediately visible, even if it's in a different month.
+    document.getElementById('attendee-conflict-warning').innerHTML = '';
     const [y, m] = date.split('-').map(Number);
     calendarYear = y; calendarMonth = m - 1; selectedCalendarDate = date;
     await refreshCalendarResilient();
+
+    let msg = '';
     if (result.series_count) {
-      let msg = `Scheduled ${result.series_count} occurrences.`;
+      msg += `Scheduled ${result.series_count} occurrences.`;
       if (result.skipped_dates && result.skipped_dates.length) {
         msg += `\n\nSkipped (room already booked): ${result.skipped_dates.join(', ')}`;
       }
-      alert(msg);
     }
+    if (result.attendee_conflicts && result.attendee_conflicts.length) {
+      const lines = result.attendee_conflicts.map(c =>
+        `${c.username} already has "${c.meeting_title}" on ${c.date} at ${c.start_time}–${c.end_time}`
+      );
+      msg += (msg ? '\n\n' : '') + `⚠️ Heads up, some attendees are double-booked:\n${lines.join('\n')}`;
+    }
+    if (msg) alert(msg);
+  }
+
+  // ── Attendee conflict warnings ───────────────────────────────────────────
+
+  let conflictCheckDebounce = null;
+
+  function checkAttendeeConflictsLive() {
+    clearTimeout(conflictCheckDebounce);
+    conflictCheckDebounce = setTimeout(async () => {
+      const date = document.getElementById('meeting-date').value;
+      const start_time = document.getElementById('meeting-start').value;
+      const end_time = document.getElementById('meeting-end').value;
+      const attendee_ids = meetings.getSelectedAttendees();
+      const warningEl = document.getElementById('attendee-conflict-warning');
+      if (!date || !start_time || !end_time || end_time <= start_time || !attendee_ids.length) {
+        warningEl.innerHTML = '';
+        return;
+      }
+      try {
+        const result = await api.checkMeetingConflicts({
+          date, start_time, end_time, attendee_ids: attendee_ids.join(',')
+        });
+        renderAttendeeConflictWarning(result.conflicts);
+      } catch { /* live check is a courtesy, not critical — fail quietly */ }
+    }, 250);
+  }
+
+  function renderAttendeeConflictWarning(conflicts) {
+    const el = document.getElementById('attendee-conflict-warning');
+    if (!conflicts || !conflicts.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="conflict-warning">⚠️ ${conflicts.map(c =>
+      `${escapeAttr(c.username)} already has "${escapeAttr(c.meeting_title)}" at ${c.start_time}–${c.end_time}`
+    ).join('<br>')}</div>`;
   }
 
   // Wraps refreshCalendarMonth() with one quiet retry so a transient network
@@ -1408,12 +1505,13 @@ const app = (() => {
     addEntry, deleteEntry, approveEntry,
     openRejectModal, closeRejectModal, confirmReject,
     openEdit, closeModal, saveEdit,
-    loadEntries, exportCSV, quickFilter,
+    loadEntries, goToEntriesPage, exportCSV, quickFilter,
     setReportPeriod, shiftPeriod, printReport,
     loadUsers, createUser, deleteUser, saveUserRow,
     loadTeams, createTeam, saveTeam, deleteTeam,
     loadRooms, createRoom, saveRoom, deleteRoom, loadMeetingsRoomAvailability,
     scheduleMeeting, cancelMeeting, respondToMeeting, declineMeeting, saveMyEmail,
+    checkAttendeeConflictsLive,
     toggleMeetingLocation, toggleGoogleMeetOption,
     toggleRecurrence, openRescheduleForm, closeRescheduleForm, submitReschedule,
     shiftCalendarMonth, selectCalendarDate, closeMeetingPanel,
