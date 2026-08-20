@@ -71,9 +71,23 @@ def _check_and_send_reminders() -> None:
             except ValueError:
                 continue
             if now <= start_dt <= window_end:
-                _send_reminder_for_meeting(conn, m)
-                conn.execute("UPDATE meetings SET reminder_sent = 1 WHERE id = ?", (m["id"],))
+                # Claim the row FIRST, atomically, before sending anything.
+                # Only one caller's UPDATE can match reminder_sent = 0 for a
+                # given id — a second scheduler (e.g. a second uvicorn
+                # worker) checking the same meeting will find 0 rows
+                # affected and skip it, instead of both callers reading
+                # reminder_sent = 0, both sending, and both marking it sent
+                # after the fact. This currently only matters if you ever
+                # run more than one server process, but it costs nothing to
+                # have right now.
+                cursor = conn.execute(
+                    "UPDATE meetings SET reminder_sent = 1 WHERE id = ? AND reminder_sent = 0",
+                    (m["id"],)
+                )
                 conn.commit()
+                if cursor.rowcount == 0:
+                    continue  # another process already claimed this one
+                _send_reminder_for_meeting(conn, m)
 
 
 def start_scheduler() -> BackgroundScheduler:

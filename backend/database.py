@@ -81,6 +81,14 @@ def init_db():
         cs_cols = [r["name"] for r in conn.execute("PRAGMA table_info(clock_sessions)").fetchall()]
         if "auto_closed" not in cs_cols:
             conn.execute("ALTER TABLE clock_sessions ADD COLUMN auto_closed INTEGER NOT NULL DEFAULT 0")
+        # Migration: a real `date` column, backfilled from clocked_in_at, so
+        # date-range queries can use an index instead of wrapping the
+        # timestamp column in substr() on every row (which defeats indexing
+        # entirely — see idx_clock_sessions_user_date below). This mirrors
+        # how entries/meetings already store `date` as its own column.
+        if "date" not in cs_cols:
+            conn.execute("ALTER TABLE clock_sessions ADD COLUMN date TEXT")
+            conn.execute("UPDATE clock_sessions SET date = substr(clocked_in_at, 1, 10) WHERE date IS NULL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS meetings (
                 id                     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,6 +171,17 @@ def init_db():
                 used        INTEGER NOT NULL DEFAULT 0
             )
         """)
+
+        # Indexes for the columns actually filtered/joined on in main.py.
+        # SQLite auto-indexes PRIMARY KEY and UNIQUE columns only — every
+        # plain foreign key (user_id, meeting_id, etc.) needs one added
+        # explicitly, or lookups on it silently full-scan the table as it
+        # grows. IF NOT EXISTS makes these safe to run on every startup.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_user_date ON entries(user_id, date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_clock_sessions_user_date ON clock_sessions(user_id, date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_meeting_attendees_user ON meeting_attendees(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_meeting_attendees_meeting ON meeting_attendees(meeting_id)")
 
         conn.commit()
         _seed_users(conn)

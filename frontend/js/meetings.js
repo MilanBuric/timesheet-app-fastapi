@@ -161,8 +161,8 @@ const meetings = (() => {
                 <button class="btn-icon danger" onclick="app.cancelMeeting(${m.id}, ${m.recurrence_group_id ? `'${m.recurrence_group_id}'` : 'null'})" title="Cancel meeting">${cancelIcon()}</button>
               </div>` : ''}
           </div>
-          <h3 class="meeting-title">${m.title}</h3>
-          ${m.description ? `<p class="meeting-desc">${m.description}</p>` : ''}
+          <h3 class="meeting-title">${escapeHtml(m.title)}</h3>
+          ${m.description ? `<p class="meeting-desc">${escapeHtml(m.description)}</p>` : ''}
           <p class="meeting-organizer">Organized by ${m.organizer_username}</p>
           ${locationInfo(m)}
           ${m.attendees.length ? `<div class="meeting-attendees">${m.attendees.map(a =>
@@ -227,7 +227,7 @@ const meetings = (() => {
 
       const dayMeetings = byDate[dateStr] || [];
       const chips = dayMeetings.slice(0, MAX_CHIPS_PER_DAY)
-        .map(m => `<div class="calendar-event-chip">${m.start_time} ${m.title}</div>`).join('');
+        .map(m => `<div class="calendar-event-chip">${m.start_time} ${escapeHtml(m.title)}</div>`).join('');
       const extra = dayMeetings.length > MAX_CHIPS_PER_DAY
         ? `<div class="calendar-event-more">+${dayMeetings.length - MAX_CHIPS_PER_DAY} more</div>` : '';
 

@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -5,7 +6,25 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-SECRET_KEY = "timesheet-secret-key-change-in-production"
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv is optional; env vars can be set another way
+
+# Was hardcoded here before — anyone with repo access (or a leaked copy)
+# could forge a valid token for any user, including a manager, since the
+# key that signs tokens was public in source control. Must be set in your
+# .env (gitignored) as JWT_SECRET_KEY=<a long random string>; there's no
+# safe default to fall back to, so startup fails loudly if it's missing
+# rather than silently signing tokens with a key someone could guess.
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET_KEY is not set. Add it to your .env file, e.g.:\n"
+        "  JWT_SECRET_KEY=<a long random string>\n"
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 12
 

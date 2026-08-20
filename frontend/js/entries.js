@@ -4,6 +4,15 @@ const entries = (() => {
     return new Date(y, m - 1, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  // Free-text fields (activity, username, rejection reason) come from user
+  // input and go straight into innerHTML below — without this, something
+  // like <img src=x onerror=...> typed as an "activity" would execute for
+  // anyone who views the table, including a manager reviewing every
+  // intern's entries.
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   function badgeClass(cat) {
     return cat === 'Self-study' ? 'study' : cat === 'Meeting' ? 'meeting' : 'other';
   }
@@ -58,12 +67,12 @@ const entries = (() => {
           <tbody>
             ${list.map(e => `
               <tr class="${e.overtime ? 'row-overtime' : ''}">
-                ${isManager ? `<td class="td-date">${e.username || '—'}</td>` : ''}
+                ${isManager ? `<td class="td-date">${e.username ? escapeHtml(e.username) : '—'}</td>` : ''}
                 <td class="td-date">${formatDate(e.date)}</td>
-                <td>${e.activity} ${e.overtime ? overtimeIcon() : ''}</td>
+                <td>${escapeHtml(e.activity)} ${e.overtime ? overtimeIcon() : ''}</td>
                 <td><span class="badge badge-${badgeClass(e.category)}">${e.category}</span></td>
                 <td class="td-hours">${e.hours}h</td>
-                <td>${statusBadge(e.status)}${e.status === 'rejected' && e.rejection_reason ? `<div class="rejection-note" title="${e.rejection_reason.replace(/"/g, '&quot;')}">${e.rejection_reason}</div>` : ''}</td>
+                <td>${statusBadge(e.status)}${e.status === 'rejected' && e.rejection_reason ? `<div class="rejection-note" title="${escapeHtml(e.rejection_reason)}">${escapeHtml(e.rejection_reason)}</div>` : ''}</td>
                 <td>
                   <div class="td-actions">
                     ${isManager ? `

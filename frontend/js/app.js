@@ -14,7 +14,7 @@ const app = (() => {
   let meetingSearchDebounce = null;
   let meetingsPollTimer = null;
   let meetingsViewActive = false;
-  const MEETINGS_POLL_MS = 20000;
+  const MEETINGS_POLL_MS = 60000;
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 

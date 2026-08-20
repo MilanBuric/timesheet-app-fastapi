@@ -256,12 +256,14 @@ def get_daily_total(conn, user_id: int, date_str: str, exclude_id: int = None) -
 
 def _get_clocked_hours(conn, user_id: int, date_from: str, date_to: str) -> float:
     """Sums completed clock-session durations whose clock-in date falls in
-    [date_from, date_to]. An ISO timestamp's first 10 characters are its
-    date, and ISO dates compare correctly as plain strings."""
+    [date_from, date_to]. Filters on the real `date` column (backed by
+    idx_clock_sessions_user_date) rather than substr(clocked_in_at, 1, 10) —
+    wrapping the timestamp in substr() would force a full table scan on
+    every call, since SQLite can't use an index through a function call."""
     rows = conn.execute(
         """SELECT clocked_in_at, clocked_out_at FROM clock_sessions
            WHERE user_id = ? AND clocked_out_at IS NOT NULL
-             AND substr(clocked_in_at, 1, 10) >= ? AND substr(clocked_in_at, 1, 10) <= ?""",
+             AND date >= ? AND date <= ?""",
         (user_id, date_from, date_to)
     ).fetchall()
     total = 0.0
@@ -277,11 +279,13 @@ def _get_clocked_hours(conn, user_id: int, date_from: str, date_to: str) -> floa
 
 def _get_clocked_hours_by_day(conn, user_id: int, date_from: str, date_to: str) -> dict:
     """Same as _get_clocked_hours but broken out per calendar date, for the
-    weekly report's day-by-day breakdown."""
+    weekly report's day-by-day breakdown. Single-user version, kept for the
+    intern's own-report path; the manager multi-intern path uses the batched
+    version below instead of calling this in a per-user loop."""
     rows = conn.execute(
-        """SELECT clocked_in_at, clocked_out_at FROM clock_sessions
+        """SELECT clocked_in_at, clocked_out_at, date FROM clock_sessions
            WHERE user_id = ? AND clocked_out_at IS NOT NULL
-             AND substr(clocked_in_at, 1, 10) >= ? AND substr(clocked_in_at, 1, 10) <= ?""",
+             AND date >= ? AND date <= ?""",
         (user_id, date_from, date_to)
     ).fetchall()
     by_day = {}
@@ -291,9 +295,34 @@ def _get_clocked_hours_by_day(conn, user_id: int, date_from: str, date_to: str) 
             end = datetime.fromisoformat(r["clocked_out_at"])
         except (ValueError, TypeError):
             continue
-        day = r["clocked_in_at"][:10]
-        by_day[day] = by_day.get(day, 0.0) + (end - start).total_seconds() / 3600
+        by_day[r["date"]] = by_day.get(r["date"], 0.0) + (end - start).total_seconds() / 3600
     return {d: round(h, 2) for d, h in by_day.items()}
+
+
+def _get_clocked_hours_by_day_batch(conn, user_ids: list, date_from: str, date_to: str) -> dict:
+    """Batched replacement for calling _get_clocked_hours_by_day once per
+    user in a loop. One query for however many users are in the report
+    (previously: one full scan per intern — 50 interns meant 50 scans of
+    the same table for a single manager report load)."""
+    result = {uid: {} for uid in user_ids}
+    if not user_ids:
+        return result
+    placeholders = ",".join("?" * len(user_ids))
+    rows = conn.execute(
+        f"""SELECT user_id, date, clocked_in_at, clocked_out_at FROM clock_sessions
+            WHERE user_id IN ({placeholders}) AND clocked_out_at IS NOT NULL
+              AND date >= ? AND date <= ?""",
+        user_ids + [date_from, date_to]
+    ).fetchall()
+    for r in rows:
+        try:
+            start = datetime.fromisoformat(r["clocked_in_at"])
+            end = datetime.fromisoformat(r["clocked_out_at"])
+        except (ValueError, TypeError):
+            continue
+        by_day = result[r["user_id"]]
+        by_day[r["date"]] = by_day.get(r["date"], 0.0) + (end - start).total_seconds() / 3600
+    return {uid: {d: round(h, 2) for d, h in days.items()} for uid, days in result.items()}
 
 
 # ── Entries ───────────────────────────────────────────────────────────────────
@@ -509,7 +538,7 @@ def weekly_report(
             rows = []
 
         # Actual worked hours per user per day — the sole basis for pay/overtime.
-        clocked_by_user_day = {uid: _get_clocked_hours_by_day(conn, uid, date_from, date_to) for uid in target_user_ids}
+        clocked_by_user_day = _get_clocked_hours_by_day_batch(conn, target_user_ids, date_from, date_to)
 
     multi_user = len(target_user_ids) > 1
 
@@ -611,8 +640,8 @@ def clock_in(current_user=Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="Already clocked in")
         now = datetime.utcnow().isoformat()
         cursor = conn.execute(
-            "INSERT INTO clock_sessions (user_id, clocked_in_at) VALUES (?, ?)",
-            (current_user["id"], now)
+            "INSERT INTO clock_sessions (user_id, clocked_in_at, date) VALUES (?, ?, ?)",
+            (current_user["id"], now, now[:10])
         )
         conn.commit()
         row = conn.execute(
@@ -673,10 +702,10 @@ def get_clock_sessions(user_id: int = None, date_from: str = None, date_to: str 
         query += " AND cs.user_id = ?"
         params.append(user_id)
     if date_from:
-        query += " AND substr(cs.clocked_in_at, 1, 10) >= ?"
+        query += " AND cs.date >= ?"
         params.append(date_from)
     if date_to:
-        query += " AND substr(cs.clocked_in_at, 1, 10) <= ?"
+        query += " AND cs.date <= ?"
         params.append(date_to)
     query += " ORDER BY cs.clocked_in_at DESC"
 
@@ -711,9 +740,12 @@ def update_clock_session(session_id: int, body: ClockSessionUpdate, current_user
         is_active = 0 if clocked_out_at else session["is_active"]
         auto_closed = 0 if clocked_out_at else session["auto_closed"]
 
+        # Keep `date` in sync with clocked_in_at — a manager correcting the
+        # clock-in time can move it to a different calendar day, and stats/
+        # reports filter on `date`, not on parsing clocked_in_at.
         conn.execute(
-            "UPDATE clock_sessions SET clocked_in_at = ?, clocked_out_at = ?, is_active = ?, auto_closed = ? WHERE id = ?",
-            (clocked_in_at, clocked_out_at, is_active, auto_closed, session_id)
+            "UPDATE clock_sessions SET clocked_in_at = ?, clocked_out_at = ?, date = ?, is_active = ?, auto_closed = ? WHERE id = ?",
+            (clocked_in_at, clocked_out_at, clocked_in_at[:10], is_active, auto_closed, session_id)
         )
         conn.commit()
         row = conn.execute(
@@ -838,6 +870,10 @@ def get_room_occupancy(room_id: int, date_from: str = None, date_to: str = None,
 
 
 def _meeting_with_attendees(conn, meeting_id: int):
+    """Single-meeting fetch — 2 queries. Used by create/reschedule/rsvp,
+    which only ever need one meeting at a time. For fetching a list of
+    meetings (get_meetings), use _meetings_with_attendees_batch instead —
+    calling this in a loop turns an N-meeting list into 1 + 2*N queries."""
     m = conn.execute(
         """SELECT m.*, u.username as organizer_username FROM meetings m
            JOIN users u ON m.organizer_id = u.id WHERE m.id = ?""",
@@ -854,6 +890,43 @@ def _meeting_with_attendees(conn, meeting_id: int):
     result = dict(m)
     result["attendees"] = [dict(a) for a in attendees]
     return result
+
+
+def _meetings_with_attendees_batch(conn, meeting_ids: list) -> list:
+    """Batched replacement for calling _meeting_with_attendees once per
+    meeting. 2 queries total regardless of how many meetings are being
+    loaded, instead of 1 + 2*N round trips — this is what get_meetings
+    calls, and get_meetings is hit by the frontend's 60s meetings poll on
+    top of every calendar view load, so the N+1 cost was paid repeatedly
+    per user, not just once per page load."""
+    if not meeting_ids:
+        return []
+    placeholders = ",".join("?" * len(meeting_ids))
+    meeting_rows = conn.execute(
+        f"""SELECT m.*, u.username as organizer_username FROM meetings m
+            JOIN users u ON m.organizer_id = u.id
+            WHERE m.id IN ({placeholders})""",
+        meeting_ids
+    ).fetchall()
+    attendee_rows = conn.execute(
+        f"""SELECT ma.meeting_id, u.id, u.username, ma.status, ma.decline_reason
+            FROM meeting_attendees ma JOIN users u ON ma.user_id = u.id
+            WHERE ma.meeting_id IN ({placeholders})
+            ORDER BY u.username""",
+        meeting_ids
+    ).fetchall()
+
+    attendees_by_meeting = {}
+    for a in attendee_rows:
+        attendees_by_meeting.setdefault(a["meeting_id"], []).append({
+            "id": a["id"], "username": a["username"],
+            "status": a["status"], "decline_reason": a["decline_reason"]
+        })
+
+    by_id = {m["id"]: dict(m) | {"attendees": attendees_by_meeting.get(m["id"], [])} for m in meeting_rows}
+    # Preserve the caller's ordering (already sorted by date/start_time)
+    # instead of whatever order the IN (...) query happens to return.
+    return [by_id[mid] for mid in meeting_ids if mid in by_id]
 
 
 @app.get("/meetings", response_model=list[MeetingResponse])
@@ -887,7 +960,7 @@ def get_meetings(date_from: str = None, date_to: str = None, search: str = None,
 
     with get_connection() as conn:
         ids = [r["id"] for r in conn.execute(query, params).fetchall()]
-        return [_meeting_with_attendees(conn, mid) for mid in ids]
+        return _meetings_with_attendees_batch(conn, ids)
 
 
 def _rooms_overlap(conn, date: str, start_time: str, end_time: str, room: str, exclude_meeting_id: int = None) -> bool:
