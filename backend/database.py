@@ -172,6 +172,17 @@ def init_db():
             )
         """)
 
+        # Login rate limiting — see rate_limit.py. Table is created
+        # unconditionally (empty/unused costs nothing) so turning the
+        # feature on later is a single .env change, not a migration.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                username        TEXT    PRIMARY KEY,
+                attempt_count   INTEGER NOT NULL DEFAULT 0,
+                locked_until    TEXT
+            )
+        """)
+
         # Indexes for the columns actually filtered/joined on in main.py.
         # SQLite auto-indexes PRIMARY KEY and UNIQUE columns only — every
         # plain foreign key (user_id, meeting_id, etc.) needs one added

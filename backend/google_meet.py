@@ -66,6 +66,7 @@ class GoogleMeetError(Exception):
 
 def _load_credentials(conn, user_id: int):
     from google.oauth2.credentials import Credentials
+    from crypto_utils import decrypt_text
     row = conn.execute("SELECT google_token FROM users WHERE id = ?", (user_id,)).fetchone()
     if row and row["google_token"]:
         try:
@@ -73,14 +74,23 @@ def _load_credentials(conn, user_id: int):
             # so would force .scopes to always equal whatever the current
             # code expects, regardless of what Google actually granted,
             # which silently breaks the exact-match staleness check below.
-            return Credentials.from_authorized_user_info(json.loads(row["google_token"]))
+            #
+            # decrypt_text raises ValueError on anything it can't decrypt —
+            # including any token saved before encryption was added, since
+            # that plaintext JSON isn't valid Fernet ciphertext. Treating
+            # that the same as "corrupted/old-format" below means an
+            # existing user just gets sent through a normal fresh
+            # re-authorization instead of the app crashing on upgrade.
+            decrypted = decrypt_text(row["google_token"])
+            return Credentials.from_authorized_user_info(json.loads(decrypted))
         except (ValueError, json.JSONDecodeError):
-            return None  # corrupted/old-format token; treat as absent
+            return None  # corrupted/old-format/pre-encryption token; treat as absent
     return None
 
 
 def _save_credentials(conn, user_id: int, creds) -> None:
-    conn.execute("UPDATE users SET google_token = ? WHERE id = ?", (creds.to_json(), user_id))
+    from crypto_utils import encrypt_text
+    conn.execute("UPDATE users SET google_token = ? WHERE id = ?", (encrypt_text(creds.to_json()), user_id))
     conn.commit()
 
 

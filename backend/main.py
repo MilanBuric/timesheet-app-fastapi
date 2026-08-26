@@ -60,12 +60,16 @@ def root():
 
 @app.post("/auth/login", response_model=TokenResponse)
 def login(body: LoginRequest):
+    import rate_limit
     with get_connection() as conn:
+        rate_limit.check_not_locked_out(conn, body.username)  # no-op unless LOGIN_RATE_LIMIT_ENABLED is set
         user = conn.execute(
             "SELECT * FROM users WHERE username = ?", (body.username,)
         ).fetchone()
-    if not user or not verify_password(body.password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        if not user or not verify_password(body.password, user["password"]):
+            rate_limit.record_failed_attempt(conn, body.username)
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        rate_limit.record_successful_login(conn, body.username)
     token = create_token({"sub": str(user["id"]), "role": user["role"]})
     return TokenResponse(
         access_token=token,

@@ -52,6 +52,10 @@ def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is not None:
         return _scheduler
+    from process_lock import acquire_singleton_lock
+    if not acquire_singleton_lock("clock_auto_close"):
+        print("ℹ️  Clock auto-close scheduler already running in another process — skipping here.")
+        return None
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(
         _check_and_close_stale_sessions, "interval",

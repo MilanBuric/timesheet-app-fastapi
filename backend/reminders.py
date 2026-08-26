@@ -94,6 +94,15 @@ def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is not None:
         return _scheduler
+    from process_lock import acquire_singleton_lock
+    if not acquire_singleton_lock("reminders"):
+        # Another process already owns this job — don't start a second,
+        # redundant scheduler here. The atomic claim in
+        # _check_and_send_reminders above is a second line of defense in
+        # case this ever runs somewhere fcntl locks don't apply, but the
+        # normal case is that this simply never runs more than once.
+        print("ℹ️  Reminders scheduler already running in another process — skipping here.")
+        return None
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(
         _check_and_send_reminders, "interval",
