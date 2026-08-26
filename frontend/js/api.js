@@ -43,7 +43,10 @@ const api = (() => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    if (!res.ok) throw new Error('Invalid username or password');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Invalid username or password');
+    }
     const data = await res.json();
     setToken(data.access_token);
     return data;

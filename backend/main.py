@@ -67,8 +67,23 @@ def login(body: LoginRequest):
             "SELECT * FROM users WHERE username = ?", (body.username,)
         ).fetchone()
         if not user or not verify_password(body.password, user["password"]):
-            rate_limit.record_failed_attempt(conn, body.username)
-            raise HTTPException(status_code=401, detail="Invalid username or password")
+            remaining = rate_limit.record_failed_attempt(conn, body.username)
+            if remaining is None:
+                # Rate limiting disabled — exact original message, unchanged.
+                raise HTTPException(status_code=401, detail="Invalid username or password")
+            if remaining == 0:
+                # This failure just triggered the lockout — check_not_locked_out
+                # will report the countdown on the NEXT attempt; this one still
+                # reads as a normal wrong-password response, since the account
+                # wasn't locked out until the moment this very request failed.
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"Invalid username or password. Account locked for {rate_limit.LOCKOUT_MINUTES} minutes after too many failed attempts."
+                )
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid username or password. {remaining} attempt(s) remaining before lockout."
+            )
         rate_limit.record_successful_login(conn, body.username)
     token = create_token({"sub": str(user["id"]), "role": user["role"]})
     return TokenResponse(

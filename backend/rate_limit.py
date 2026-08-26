@@ -51,11 +51,17 @@ def check_not_locked_out(conn, username: str) -> None:
     conn.commit()
 
 
-def record_failed_attempt(conn, username: str) -> None:
+def record_failed_attempt(conn, username: str) -> "int | None":
     """Call this after a failed password check. Locks the username out
-    once MAX_ATTEMPTS is reached within the tracked window."""
+    once MAX_ATTEMPTS is reached within the tracked window.
+
+    Returns the number of attempts remaining before a lockout would kick
+    in (0 means this failure just triggered the lockout), or None if rate
+    limiting is disabled entirely — callers should distinguish "no limit
+    in effect" (None) from "zero attempts left" (0), since those need
+    different messages shown to the user."""
     if not _enabled():
-        return
+        return None
     row = conn.execute(
         "SELECT attempt_count FROM login_attempts WHERE username = ?", (username,)
     ).fetchone()
@@ -70,6 +76,8 @@ def record_failed_attempt(conn, username: str) -> None:
         (username, new_count, locked_until, new_count, locked_until)
     )
     conn.commit()
+    return 0 if locked_until else MAX_ATTEMPTS - new_count
+
 
 
 def record_successful_login(conn, username: str) -> None:
