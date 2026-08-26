@@ -68,6 +68,20 @@ def init_db():
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
         if "rejection_reason" not in cols:
             conn.execute("ALTER TABLE entries ADD COLUMN rejection_reason TEXT")
+        # Migration: dedupe_key closes a real race in create_entry — the old
+        # code checked for a duplicate, then inserted, as two separate
+        # steps; two near-simultaneous requests (a double-click, a flaky
+        # retry) could both pass the check before either committed. Set to
+        # f"{user_id}|{date}|{activity}" for a normal (non-forced) entry,
+        # and to NULL when the user explicitly confirms a forced duplicate
+        # (EntryCreate.force) — NULL is intentional here, not a gap: SQL
+        # unique indexes treat every NULL as distinct from every other
+        # value, so forced duplicates can still coexist freely while
+        # non-forced ones are now enforced atomically by SQLite itself,
+        # not by application-level timing.
+        if "dedupe_key" not in cols:
+            conn.execute("ALTER TABLE entries ADD COLUMN dedupe_key TEXT")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_dedupe ON entries(dedupe_key)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS clock_sessions (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,

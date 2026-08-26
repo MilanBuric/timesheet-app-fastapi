@@ -390,22 +390,26 @@ def get_entries(
 
 @app.post("/entries", response_model=EntryResponse, status_code=201)
 def create_entry(entry: EntryCreate, current_user=Depends(get_current_user)):
+    import sqlite3
+    dedupe_key = None if entry.force else f"{current_user['id']}|{entry.date}|{entry.activity}"
     with get_connection() as conn:
-        if not entry.force:
-            duplicate = conn.execute(
-                "SELECT id FROM entries WHERE user_id = ? AND date = ? AND activity = ?",
-                (current_user["id"], entry.date, entry.activity)
-            ).fetchone()
-            if duplicate:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Duplicate entry: '{entry.activity}' already logged on {entry.date}."
-                )
-        cursor = conn.execute(
-            "INSERT INTO entries (user_id, date, activity, category, hours) VALUES (?, ?, ?, ?, ?)",
-            (current_user["id"], entry.date, entry.activity, entry.category.value, entry.hours)
-        )
-        conn.commit()
+        try:
+            cursor = conn.execute(
+                "INSERT INTO entries (user_id, date, activity, category, hours, dedupe_key) VALUES (?, ?, ?, ?, ?, ?)",
+                (current_user["id"], entry.date, entry.activity, entry.category.value, entry.hours, dedupe_key)
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # The dedupe_key unique index rejected this insert — someone
+            # already has this exact (user, date, activity) combination as
+            # a non-forced entry. Same response shape as before, but now
+            # backed by an atomic DB-level guarantee instead of a
+            # check-then-insert race: two near-simultaneous requests for
+            # the same entry can no longer both succeed.
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate entry: '{entry.activity}' already logged on {entry.date}."
+            )
         row = dict(conn.execute(
             "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE e.id = ?",
             (cursor.lastrowid,)

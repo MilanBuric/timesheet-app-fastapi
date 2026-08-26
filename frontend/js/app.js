@@ -15,6 +15,12 @@ const app = (() => {
   let meetingsPollTimer = null;
   let meetingsViewActive = false;
   const MEETINGS_POLL_MS = 60000;
+  let usersPollTimer = null;
+  let usersViewActive = false;
+  const USERS_POLL_MS = 60000;
+  let entriesPollTimer = null;
+  let entriesViewActive = false;
+  const ENTRIES_POLL_MS = 60000;
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
@@ -49,6 +55,10 @@ const app = (() => {
   function resetToCleanState() {
     stopMeetingsPolling();
     meetingsViewActive = false;
+    stopUsersPolling();
+    usersViewActive = false;
+    stopEntriesPolling();
+    entriesViewActive = false;
 
     document.querySelectorAll('.nav-item').forEach(l => l.classList.remove('active'));
     const dashboardNav = document.querySelector('.nav-item[data-view="dashboard"]');
@@ -212,16 +222,26 @@ const app = (() => {
         meetingsViewActive = (view === 'meetings');
         if (view === 'meetings') { loadMeetingsView(); startMeetingsPolling(); }
         else { stopMeetingsPolling(); }
-        if (view === 'users') { loadUsers(); loadTeams(); loadRooms(); loadClockSessions(); }
+        entriesViewActive = (view === 'entries');
+        if (view === 'entries') { startEntriesPolling(); }
+        else { stopEntriesPolling(); }
+        usersViewActive = (view === 'users');
+        if (view === 'users') { refreshUsersView(); startUsersPolling(); }
+        else { stopUsersPolling(); }
         closeSidebar(); // on mobile the drawer should close after picking a destination
       });
     });
-    // A colleague's RSVP (from the emailed link, or another session) doesn't
-    // reach this tab on its own — periodic polling plus an immediate refresh
-    // when the tab regains focus is what actually keeps "Pending" from
-    // sitting stale until a manual reload.
+    // A colleague's RSVP (from the emailed link, or another session), a
+    // manager's user/team/room edit, or another intern's entry — none of
+    // these reach an open tab on their own. Periodic polling plus an
+    // immediate refresh when the tab regains focus is what keeps all
+    // three views (Meetings, Entries, Users) from sitting stale until a
+    // manual reload — previously only Meetings had this.
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && meetingsViewActive) refreshCalendarResilient();
+      if (document.hidden) return;
+      if (meetingsViewActive) refreshCalendarResilient();
+      if (entriesViewActive) fetchAndRenderEntries();
+      if (usersViewActive) refreshUsersView();
     });
 
     // Mobile sidebar drawer — the hamburger button and its own overlay only
@@ -250,6 +270,36 @@ const app = (() => {
 
   function stopMeetingsPolling() {
     if (meetingsPollTimer) { clearInterval(meetingsPollTimer); meetingsPollTimer = null; }
+  }
+
+  // Bundles the four fetches the Users tab actually displays, so the
+  // initial view-switch load and every later poll/focus-refresh call the
+  // exact same thing — one place to update if that tab's data needs ever
+  // change, instead of two lists that can drift apart.
+  async function refreshUsersView() {
+    await Promise.all([loadUsers(), loadTeams(), loadRooms(), loadClockSessions()]);
+  }
+
+  function startUsersPolling() {
+    stopUsersPolling();
+    usersPollTimer = setInterval(() => {
+      if (!document.hidden) refreshUsersView();
+    }, USERS_POLL_MS);
+  }
+
+  function stopUsersPolling() {
+    if (usersPollTimer) { clearInterval(usersPollTimer); usersPollTimer = null; }
+  }
+
+  function startEntriesPolling() {
+    stopEntriesPolling();
+    entriesPollTimer = setInterval(() => {
+      if (!document.hidden) fetchAndRenderEntries();
+    }, ENTRIES_POLL_MS);
+  }
+
+  function stopEntriesPolling() {
+    if (entriesPollTimer) { clearInterval(entriesPollTimer); entriesPollTimer = null; }
   }
 
   // ── Stats ─────────────────────────────────────────────────────────────────
