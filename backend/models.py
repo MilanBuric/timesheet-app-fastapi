@@ -93,7 +93,7 @@ class UpdateUserProfileRequest(BaseModel):
 
 class CreateUserRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
     role: str = Field(..., pattern="^(intern|manager)$")
     hourly_rate: float = Field(0.0, ge=0)
     title: Optional[str] = Field(None, max_length=100)
@@ -209,7 +209,7 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=8)
 
 
 class MeetingCreate(BaseModel):

@@ -172,9 +172,9 @@ const app = (() => {
     const token = params.get('reset_token');
     const newPassword = document.getElementById('reset-new-password').value;
     const msgEl = document.getElementById('reset-password-message');
-    if (!newPassword || newPassword.length < 6) {
+    if (!newPassword || newPassword.length < 8) {
       msgEl.style.color = 'var(--danger)';
-      msgEl.textContent = 'Password must be at least 6 characters.';
+      msgEl.textContent = 'Password must be at least 8 characters.';
       return;
     }
     try {
@@ -779,7 +779,7 @@ const app = (() => {
             </div>
             <div class="form-group">
               <label for="new-password">Password</label>
-              <input type="password" id="new-password" placeholder="min. 6 characters" autocomplete="new-password" />
+              <input type="password" id="new-password" placeholder="min. 8 characters" autocomplete="new-password" />
             </div>
             <div class="form-group">
               <label for="new-password-confirm">Confirm password</label>
@@ -851,7 +851,7 @@ const app = (() => {
     const errEl = document.getElementById('create-user-error');
     errEl.textContent = '';
     if (!username || !password) { errEl.textContent = 'Please fill in all fields.'; return; }
-    if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+    if (password.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; return; }
     if (password !== passwordConfirm) { errEl.textContent = 'Passwords do not match.'; return; }
     try {
       await api.createUser({

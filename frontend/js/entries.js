@@ -91,9 +91,23 @@ const entries = (() => {
       </div>`;
   }
 
+  // Excel/Sheets can interpret a CSV cell starting with =, +, -, @ (or a
+  // leading tab/carriage return) as the start of a formula rather than
+  // plain text — a malicious "activity" value like =cmd|'/c calc'!A1
+  // could run when whoever exports this file opens it in a spreadsheet
+  // program, not when it's viewed in this app. Prefixing such a value
+  // with a single quote is the standard neutralization: spreadsheet
+  // programs then always treat the cell as literal text. Only `activity`
+  // needs this — date/category/hours/status are all controlled
+  // vocabularies/formats already, not arbitrary user-entered text.
+  function sanitizeCsvField(value) {
+    const s = String(value);
+    return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  }
+
   function exportCSV(list) {
     const header = ['Date', 'Activity', 'Category', 'Hours', 'Status'];
-    const rows = list.map(e => [e.date, `"${e.activity.replace(/"/g, '""')}"`, e.category, e.hours, e.status]);
+    const rows = list.map(e => [e.date, `"${sanitizeCsvField(e.activity).replace(/"/g, '""')}"`, e.category, e.hours, e.status]);
     const csv = [header, ...rows].map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
