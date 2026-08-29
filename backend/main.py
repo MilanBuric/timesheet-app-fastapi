@@ -119,8 +119,18 @@ def forgot_password(body: ForgotPasswordRequest):
     # exists, so this endpoint can't be used to enumerate valid usernames.
     generic_response = {"message": "If that account has an email on file, a reset link has been sent."}
     with get_connection() as conn:
+        # Opportunistic cleanup: every reset request is a natural, low-cost
+        # moment to sweep out tokens that are no longer useful — expired,
+        # or already used. No dedicated background job needed for a table
+        # this low-traffic; it just stays bounded as a side effect of the
+        # table being touched at all.
+        conn.execute(
+            "DELETE FROM password_reset_tokens WHERE used = 1 OR expires_at < ?",
+            (datetime.utcnow().isoformat(),)
+        )
         user = conn.execute("SELECT * FROM users WHERE username = ?", (body.username,)).fetchone()
         if not user or not user["email"]:
+            conn.commit()  # still commit the cleanup above even on the early-return path
             return generic_response
         token = secrets.token_urlsafe(32)
         expires_at = (datetime.utcnow() + timedelta(hours=1)).isoformat()

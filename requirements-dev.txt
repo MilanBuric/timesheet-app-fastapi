@@ -1,0 +1,6 @@
+# Only needed to run the test suite (pytest tests/) — not needed to run
+# the app itself, so this is kept separate from requirements.txt.
+#
+# Install with: pip install -r requirements-dev.txt
+pytest==9.1.1
+httpx==0.28.1
