@@ -87,3 +87,84 @@ def record_successful_login(conn, username: str) -> None:
         return
     conn.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
     conn.commit()
+
+
+# ── Forgot-password rate limiting ────────────────────────────────────────
+#
+# Closes the asymmetry with login: /auth/login was rate-limited, but
+# nothing stopped repeated /auth/forgot-password requests for the same
+# username — cheap to abuse for spamming a real user's inbox with reset
+# emails, or for hammering the SMTP server.
+#
+# This is deliberately a DIFFERENT shape from the login lockout above,
+# not a reuse of it, for one important reason: every /auth/forgot-password
+# request already gets the exact same generic response whether or not the
+# account exists, specifically so the endpoint can't be used to enumerate
+# valid usernames. If a lockout here ever changed that response (e.g. a
+# distinct "too many requests" message, or an HTTP 429), a real username
+# would start looking different from a fake one under repeated requests —
+# reintroducing the exact leak the generic response exists to prevent. So
+# a lockout here must stay completely silent: it only skips the "create a
+# token and send an email" side effect, never the response text or status
+# code, and it's tracked by the raw username string (same as login),
+# never by whether a user row actually exists.
+#
+# ON by default (unlike login, which defaults off): the login lockout was
+# left off by default specifically because getting locked out of your own
+# account is a real cost worth being deliberate about turning on. Getting
+# temporarily throttled on *requesting a reset link* has no such
+# downside — nothing about signing in or using the app is affected, so
+# there's no real reason to ship this switched off. Override with
+# FORGOT_PASSWORD_RATE_LIMIT_ENABLED=false in .env if you ever want it
+# off.
+FORGOT_PASSWORD_MAX_REQUESTS = 3
+FORGOT_PASSWORD_LOCKOUT_MINUTES = 30
+
+
+def _forgot_password_enabled() -> bool:
+    return os.environ.get("FORGOT_PASSWORD_RATE_LIMIT_ENABLED", "true").lower() not in ("false", "0", "")
+
+
+def is_forgot_password_locked_out(conn, username: str) -> bool:
+    """Returns True if this username has made too many reset requests
+    recently and this one should be silently throttled — no token
+    created, no email sent, but the caller must still return its normal
+    generic response either way (see module note above)."""
+    if not _forgot_password_enabled():
+        return False
+    row = conn.execute(
+        "SELECT locked_until FROM forgot_password_attempts WHERE username = ?", (username,)
+    ).fetchone()
+    if not row or not row["locked_until"]:
+        return False
+    locked_until = datetime.fromisoformat(row["locked_until"])
+    if datetime.utcnow() < locked_until:
+        return True
+    # Lockout window has passed on its own — clear it so the next check is cheap.
+    conn.execute("DELETE FROM forgot_password_attempts WHERE username = ?", (username,))
+    conn.commit()
+    return False
+
+
+def record_forgot_password_request(conn, username: str) -> None:
+    """Call this for EVERY /auth/forgot-password request, for every
+    username, whether or not the account exists — same principle as
+    record_failed_attempt for login, so the enumeration protection holds
+    up under rate limiting too, not just under the generic response
+    alone."""
+    if not _forgot_password_enabled():
+        return
+    row = conn.execute(
+        "SELECT attempt_count FROM forgot_password_attempts WHERE username = ?", (username,)
+    ).fetchone()
+    new_count = (row["attempt_count"] if row else 0) + 1
+    locked_until = None
+    if new_count >= FORGOT_PASSWORD_MAX_REQUESTS:
+        locked_until = (datetime.utcnow() + timedelta(minutes=FORGOT_PASSWORD_LOCKOUT_MINUTES)).isoformat()
+        new_count = 0  # reset the counter now that a lockout has been applied
+    conn.execute(
+        """INSERT INTO forgot_password_attempts (username, attempt_count, locked_until) VALUES (?, ?, ?)
+           ON CONFLICT(username) DO UPDATE SET attempt_count = ?, locked_until = ?""",
+        (username, new_count, locked_until, new_count, locked_until)
+    )
+    conn.commit()

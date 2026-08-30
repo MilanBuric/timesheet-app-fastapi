@@ -226,6 +226,84 @@ def test_forgot_password_sweeps_dead_tokens(client, manager_headers, temp_db):
     assert "dead-used" not in remaining_tokens
 
 
+# ── Forgot-password rate limiting ───────────────────────────────────────
+# Closes the exact asymmetry noted in the handoff: /auth/login was
+# rate-limited, /auth/forgot-password wasn't. ON by default (see
+# rate_limit.py), so no monkeypatch is needed to enable it here — only to
+# disable it, for the one test that checks the off-switch.
+
+def test_forgot_password_rate_limited_after_threshold(client, manager_headers, temp_db):
+    client.patch("/auth/me/email", headers=manager_headers, json={"email": "manager@example.com"})
+
+    responses = [client.post("/auth/forgot-password", json={"username": "manager"}).json() for _ in range(4)]
+    # The response must be byte-identical whether or not this request got
+    # throttled — a different message would leak the rate-limit state.
+    assert len({r["message"] for r in responses}) == 1
+
+    import sqlite3
+    conn = sqlite3.connect(temp_db)
+    token_count = conn.execute("SELECT COUNT(*) FROM password_reset_tokens WHERE used = 0").fetchone()[0]
+    conn.close()
+    assert token_count == 3, "the 4th request should have been silently throttled, issuing no new token"
+
+
+def test_forgot_password_lockout_is_per_username(client, manager_headers, temp_db):
+    client.patch("/auth/me/email", headers=manager_headers, json={"email": "manager@example.com"})
+    for _ in range(4):
+        client.post("/auth/forgot-password", json={"username": "manager"})
+
+    # A completely different username must be unaffected by manager's lockout.
+    r = client.post("/auth/forgot-password", json={"username": "intern"})
+    assert r.status_code == 200
+    assert r.json()["message"] == "If that account has an email on file, a reset link has been sent."
+
+
+def test_forgot_password_lockout_applies_to_unknown_usernames_too(client):
+    """The counter must key on the raw username string, not on whether an
+    account actually exists — otherwise a real username would eventually
+    behave differently under repeated requests than a fake one, leaking
+    exactly what the generic response is designed to hide."""
+    responses = [client.post("/auth/forgot-password", json={"username": "totally-fake-user"}) for _ in range(4)]
+    assert all(r.status_code == 200 for r in responses)
+    assert len({r.json()["message"] for r in responses}) == 1
+
+
+def test_forgot_password_lockout_expires_and_clears_itself(client, manager_headers, temp_db):
+    """An already-expired lockout should be cleared on the next request,
+    without needing to wait 30 real minutes for the test to run."""
+    import sqlite3
+    conn = sqlite3.connect(temp_db)
+    past = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+    conn.execute(
+        "INSERT INTO forgot_password_attempts (username, attempt_count, locked_until) VALUES (?, 0, ?)",
+        ("manager", past)
+    )
+    conn.commit()
+    conn.close()
+
+    client.patch("/auth/me/email", headers=manager_headers, json={"email": "manager@example.com"})
+    r = client.post("/auth/forgot-password", json={"username": "manager"})
+    assert r.status_code == 200
+
+    conn = sqlite3.connect(temp_db)
+    token_count = conn.execute("SELECT COUNT(*) FROM password_reset_tokens WHERE used = 0").fetchone()[0]
+    conn.close()
+    assert token_count == 1, "an expired lockout should not block a fresh reset request"
+
+
+def test_forgot_password_rate_limiting_can_be_disabled(client, manager_headers, monkeypatch, temp_db):
+    monkeypatch.setenv("FORGOT_PASSWORD_RATE_LIMIT_ENABLED", "false")
+    client.patch("/auth/me/email", headers=manager_headers, json={"email": "manager@example.com"})
+    for _ in range(6):
+        client.post("/auth/forgot-password", json={"username": "manager"})
+
+    import sqlite3
+    conn = sqlite3.connect(temp_db)
+    token_count = conn.execute("SELECT COUNT(*) FROM password_reset_tokens WHERE used = 0").fetchone()[0]
+    conn.close()
+    assert token_count == 6, "with rate limiting disabled, every request should issue a token as before"
+
+
 def test_password_minimum_length_enforced(client, manager_headers):
     r = client.post("/users", headers=manager_headers, json={
         "username": "shortpwtest", "password": "abc1234", "role": "intern"  # 7 chars

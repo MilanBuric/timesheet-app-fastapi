@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from pathlib import Path
+import os
 import secrets
 import uuid
 from datetime import datetime, date, timedelta
@@ -23,9 +24,20 @@ import clock_auto_close
 
 app = FastAPI(title="Timesheet API")
 
+# Locked to origins the app is actually ever served from. The frontend
+# uses root-relative paths (/static/..., /auth/login, etc.), so it can
+# only ever be loaded from the same origin as the API itself — there's
+# no legitimate case where a browser needs cross-origin access here.
+# BASE_URL tracks wherever that origin currently is (set by
+# start_with_ngrok.py for tunnel testing, or your real domain once
+# deployed) so this doesn't need touching again later.
+_allowed_origins = ["http://localhost:8000", "http://127.0.0.1:8000"]
+if os.environ.get("BASE_URL"):
+    _allowed_origins.append(os.environ["BASE_URL"])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Total-Count"],
@@ -115,8 +127,11 @@ def update_my_email(body: UpdateEmailRequest, current_user=Depends(get_current_u
 
 @app.post("/auth/forgot-password")
 def forgot_password(body: ForgotPasswordRequest):
+    import rate_limit
     # Always return the same generic response whether or not the account/email
-    # exists, so this endpoint can't be used to enumerate valid usernames.
+    # exists, so this endpoint can't be used to enumerate valid usernames. This
+    # must hold even when rate-limited — see rate_limit.py's forgot-password
+    # section for why the lockout below never changes this response.
     generic_response = {"message": "If that account has an email on file, a reset link has been sent."}
     with get_connection() as conn:
         # Opportunistic cleanup: every reset request is a natural, low-cost
@@ -128,9 +143,16 @@ def forgot_password(body: ForgotPasswordRequest):
             "DELETE FROM password_reset_tokens WHERE used = 1 OR expires_at < ?",
             (datetime.utcnow().isoformat(),)
         )
+        conn.commit()
+
+        if rate_limit.is_forgot_password_locked_out(conn, body.username):
+            # Silently throttled: no token, no email — but the exact same
+            # response as a normal request, real account or not.
+            return generic_response
+        rate_limit.record_forgot_password_request(conn, body.username)
+
         user = conn.execute("SELECT * FROM users WHERE username = ?", (body.username,)).fetchone()
         if not user or not user["email"]:
-            conn.commit()  # still commit the cleanup above even on the early-return path
             return generic_response
         token = secrets.token_urlsafe(32)
         expires_at = (datetime.utcnow() + timedelta(hours=1)).isoformat()

@@ -197,6 +197,18 @@ def init_db():
             )
         """)
 
+        # Forgot-password rate limiting — same shape as login_attempts, but
+        # tracks how many reset *requests* a username has made rather than
+        # failed passwords (there's no such thing as a "failed" forgot-
+        # password request). See rate_limit.py.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS forgot_password_attempts (
+                username        TEXT    PRIMARY KEY,
+                attempt_count   INTEGER NOT NULL DEFAULT 0,
+                locked_until    TEXT
+            )
+        """)
+
         # Indexes for the columns actually filtered/joined on in main.py.
         # SQLite auto-indexes PRIMARY KEY and UNIQUE columns only — every
         # plain foreign key (user_id, meeting_id, etc.) needs one added
