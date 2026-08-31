@@ -1,18 +1,20 @@
 const api = (() => {
-  let token = sessionStorage.getItem('ts_token') || null;
+  let token = sessionStorage.getItem("ts_token") || null;
 
   function setToken(t) {
     token = t;
-    if (t) sessionStorage.setItem('ts_token', t);
-    else sessionStorage.removeItem('ts_token');
+    if (t) sessionStorage.setItem("ts_token", t);
+    else sessionStorage.removeItem("ts_token");
   }
 
-  function getToken() { return token; }
+  function getToken() {
+    return token;
+  }
 
   function authHeaders() {
     return token
-      ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' };
+      ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+      : { "Content-Type": "application/json" };
   }
 
   async function request(method, path, body = null, _isRetry = false) {
@@ -27,325 +29,404 @@ const api = (() => {
       // is still finishing the previous one. Safe (GET) requests get one
       // quiet retry before we let the error bubble up, since GETs have no
       // side effects to worry about repeating.
-      if (method === 'GET' && !_isRetry) {
-        await new Promise(r => setTimeout(r, 400));
+      if (method === "GET" && !_isRetry) {
+        await new Promise((r) => setTimeout(r, 400));
         return request(method, path, body, true);
       }
       throw networkErr;
     }
-    if (res.status === 401) { setToken(null); window.location.reload(); return; }
+    if (res.status === 401) {
+      setToken(null);
+      window.location.reload();
+      return;
+    }
     return res;
   }
 
   async function login(username, password) {
-    const res = await fetch('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Invalid username or password');
+      throw new Error(err.detail || "Invalid username or password");
     }
     const data = await res.json();
     setToken(data.access_token);
     return data;
   }
 
-  function logout() { setToken(null); }
+  function logout() {
+    setToken(null);
+  }
 
   async function me() {
-    const res = await request('GET', '/auth/me');
-    if (!res.ok) throw new Error('Not authenticated');
+    const res = await request("GET", "/auth/me");
+    if (!res.ok) throw new Error("Not authenticated");
     return res.json();
   }
 
   async function getUsers() {
-    const res = await request('GET', '/users');
-    if (!res.ok) throw new Error('Failed to fetch users');
+    const res = await request("GET", "/users");
+    if (!res.ok) throw new Error("Failed to fetch users");
     return res.json();
   }
 
   async function createUser(data) {
-    const res = await request('POST', '/users', data);
-    if (res.status === 409) throw new Error('Username already taken');
-    if (!res.ok) throw new Error('Failed to create user');
+    const res = await request("POST", "/users", data);
+    if (res.status === 409) throw new Error("Username already taken");
+    if (!res.ok) throw new Error("Failed to create user");
     return res.json();
   }
 
   async function deleteUser(id) {
-    const res = await request('DELETE', `/users/${id}`);
-    if (!res.ok) throw new Error('Failed to delete user');
+    const res = await request("DELETE", `/users/${id}`);
+    if (!res.ok) throw new Error("Failed to delete user");
   }
 
   async function setHourlyRate(userId, rate) {
-    const res = await request('PATCH', `/users/${userId}/rate`, { hourly_rate: rate });
-    if (!res.ok) throw new Error('Failed to update rate');
+    const res = await request("PATCH", `/users/${userId}/rate`, {
+      hourly_rate: rate,
+    });
+    if (!res.ok) throw new Error("Failed to update rate");
     return res.json();
   }
 
   async function updateUserProfile(userId, data) {
-    const res = await request('PATCH', `/users/${userId}/profile`, data);
+    const res = await request("PATCH", `/users/${userId}/profile`, data);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to update profile');
+      throw new Error(err.detail || "Failed to update profile");
     }
     return res.json();
   }
 
   async function getTeams() {
-    const res = await request('GET', '/teams');
-    if (!res.ok) throw new Error('Failed to fetch teams');
+    const res = await request("GET", "/teams");
+    if (!res.ok) throw new Error("Failed to fetch teams");
     return res.json();
   }
 
   async function createTeam(name) {
-    const res = await request('POST', '/teams', { name });
+    const res = await request("POST", "/teams", { name });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to add team');
+      throw new Error(err.detail || "Failed to add team");
     }
     return res.json();
   }
 
   async function updateTeam(id, name) {
-    const res = await request('PATCH', `/teams/${id}`, { name });
+    const res = await request("PATCH", `/teams/${id}`, { name });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to update team');
+      throw new Error(err.detail || "Failed to update team");
     }
     return res.json();
   }
 
   async function deleteTeam(id) {
-    const res = await request('DELETE', `/teams/${id}`);
-    if (!res.ok) throw new Error('Failed to delete team');
+    const res = await request("DELETE", `/teams/${id}`);
+    if (!res.ok) throw new Error("Failed to delete team");
   }
 
   async function getEntries(params = {}) {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)));
-    const res = await request('GET', `/entries?${qs}`);
-    if (!res.ok) throw new Error('Failed to fetch entries');
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v)),
+    );
+    const res = await request("GET", `/entries?${qs}`);
+    if (!res.ok) throw new Error("Failed to fetch entries");
     return res.json();
   }
 
   async function getEntriesPaginated(params = {}) {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v || v === 0)));
-    const res = await request('GET', `/entries?${qs}`);
-    if (!res.ok) throw new Error('Failed to fetch entries');
+    const qs = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params).filter(([, v]) => v || v === 0),
+      ),
+    );
+    const res = await request("GET", `/entries?${qs}`);
+    if (!res.ok) throw new Error("Failed to fetch entries");
     const data = await res.json();
-    const total = parseInt(res.headers.get('X-Total-Count'), 10);
+    const total = parseInt(res.headers.get("X-Total-Count"), 10);
     return { data, total: isNaN(total) ? data.length : total };
   }
 
   async function createEntry(data) {
-    const res = await request('POST', '/entries', data);
+    const res = await request("POST", "/entries", data);
     if (res.status === 409) {
       const err = await res.json();
       const e = new Error(err.detail);
       e.status = 409;
       throw e;
     }
-    if (!res.ok) throw new Error('Failed to create entry');
+    if (!res.ok) throw new Error("Failed to create entry");
     return res.json();
   }
 
   async function updateEntry(id, data) {
-    const res = await request('PATCH', `/entries/${id}`, data);
-    if (!res.ok) throw new Error('Failed to update entry');
+    const res = await request("PATCH", `/entries/${id}`, data);
+    if (!res.ok) throw new Error("Failed to update entry");
     return res.json();
   }
 
   async function deleteEntry(id) {
-    const res = await request('DELETE', `/entries/${id}`);
-    if (!res.ok) throw new Error('Failed to delete entry');
+    const res = await request("DELETE", `/entries/${id}`);
+    if (!res.ok) throw new Error("Failed to delete entry");
   }
 
   async function approveEntry(id) {
-    const res = await request('POST', `/entries/${id}/approve`);
-    if (!res.ok) throw new Error('Failed to approve entry');
+    const res = await request("POST", `/entries/${id}/approve`);
+    if (!res.ok) throw new Error("Failed to approve entry");
     return res.json();
   }
 
-  async function rejectEntry(id, reason = '') {
-    const res = await request('POST', `/entries/${id}/reject`, { reason: reason || null });
-    if (!res.ok) throw new Error('Failed to reject entry');
+  async function rejectEntry(id, reason = "") {
+    const res = await request("POST", `/entries/${id}/reject`, {
+      reason: reason || null,
+    });
+    if (!res.ok) throw new Error("Failed to reject entry");
     return res.json();
   }
 
   async function getBasicUsers() {
-    const res = await request('GET', '/users/basic');
-    if (!res.ok) throw new Error('Failed to fetch users');
+    const res = await request("GET", "/users/basic");
+    if (!res.ok) throw new Error("Failed to fetch users");
     return res.json();
   }
 
   async function getMeetings(params = {}) {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)));
-    const res = await request('GET', `/meetings?${qs}`);
-    if (!res.ok) throw new Error('Failed to fetch meetings');
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v)),
+    );
+    const res = await request("GET", `/meetings?${qs}`);
+    if (!res.ok) throw new Error("Failed to fetch meetings");
     return res.json();
   }
 
   async function createMeeting(data) {
-    const res = await request('POST', '/meetings', data);
+    const res = await request("POST", "/meetings", data);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to schedule meeting');
+      throw new Error(err.detail || "Failed to schedule meeting");
     }
     return res.json();
   }
 
   async function checkMeetingConflicts(params) {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)));
-    const res = await request('GET', `/meetings/check-conflicts?${qs}`);
-    if (!res.ok) throw new Error('Failed to check conflicts');
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v)),
+    );
+    const res = await request("GET", `/meetings/check-conflicts?${qs}`);
+    if (!res.ok) throw new Error("Failed to check conflicts");
     return res.json();
   }
 
   async function deleteMeeting(id) {
-    const res = await request('DELETE', `/meetings/${id}`);
-    if (!res.ok) throw new Error('Failed to cancel meeting');
+    const res = await request("DELETE", `/meetings/${id}`);
+    if (!res.ok) throw new Error("Failed to cancel meeting");
   }
 
   async function deleteMeetingSeries(groupId) {
-    const res = await request('DELETE', `/meetings/series/${groupId}`);
-    if (!res.ok) throw new Error('Failed to cancel the meeting series');
+    const res = await request("DELETE", `/meetings/series/${groupId}`);
+    if (!res.ok) throw new Error("Failed to cancel the meeting series");
   }
 
   async function rescheduleMeeting(id, data) {
-    const res = await request('PATCH', `/meetings/${id}/reschedule`, data);
+    const res = await request("PATCH", `/meetings/${id}/reschedule`, data);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to reschedule meeting');
+      throw new Error(err.detail || "Failed to reschedule meeting");
     }
     return res.json();
   }
 
   async function rsvpMeeting(id, status, reason = null) {
-    const res = await request('POST', `/meetings/${id}/rsvp`, { status, reason });
-    if (!res.ok) throw new Error('Failed to respond to meeting');
+    const res = await request("POST", `/meetings/${id}/rsvp`, {
+      status,
+      reason,
+    });
+    if (!res.ok) throw new Error("Failed to respond to meeting");
     return res.json();
   }
 
   async function getRooms() {
-    const res = await request('GET', '/rooms');
-    if (!res.ok) throw new Error('Failed to fetch rooms');
+    const res = await request("GET", "/rooms");
+    if (!res.ok) throw new Error("Failed to fetch rooms");
     return res.json();
   }
 
   async function createRoom(data) {
-    const res = await request('POST', '/rooms', data);
+    const res = await request("POST", "/rooms", data);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to add room');
+      throw new Error(err.detail || "Failed to add room");
     }
     return res.json();
   }
 
   async function updateRoom(id, data) {
-    const res = await request('PATCH', `/rooms/${id}`, data);
-    if (!res.ok) throw new Error('Failed to update room');
+    const res = await request("PATCH", `/rooms/${id}`, data);
+    if (!res.ok) throw new Error("Failed to update room");
     return res.json();
   }
 
   async function deleteRoom(id) {
-    const res = await request('DELETE', `/rooms/${id}`);
-    if (!res.ok) throw new Error('Failed to delete room');
+    const res = await request("DELETE", `/rooms/${id}`);
+    if (!res.ok) throw new Error("Failed to delete room");
   }
 
   async function getRoomOccupancy(id) {
-    const res = await request('GET', `/rooms/${id}/occupancy`);
-    if (!res.ok) throw new Error('Failed to fetch room schedule');
+    const res = await request("GET", `/rooms/${id}/occupancy`);
+    if (!res.ok) throw new Error("Failed to fetch room schedule");
     return res.json();
   }
 
   async function getClockSessions(params = {}) {
     const query = new URLSearchParams(params).toString();
-    const res = await request('GET', `/clock-sessions${query ? '?' + query : ''}`);
-    if (!res.ok) throw new Error('Failed to fetch clock sessions');
+    const res = await request(
+      "GET",
+      `/clock-sessions${query ? "?" + query : ""}`,
+    );
+    if (!res.ok) throw new Error("Failed to fetch clock sessions");
     return res.json();
   }
 
   async function updateClockSession(id, data) {
-    const res = await request('PATCH', `/clock-sessions/${id}`, data);
+    const res = await request("PATCH", `/clock-sessions/${id}`, data);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to update clock session');
+      throw new Error(err.detail || "Failed to update clock session");
     }
     return res.json();
   }
 
   async function forgotPassword(username) {
-    const res = await fetch('/auth/forgot-password', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username })
+    const res = await fetch("/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
     });
-    if (!res.ok) throw new Error('Failed to request password reset');
+    if (!res.ok) throw new Error("Failed to request password reset");
     return res.json();
   }
 
   async function resetPassword(resetToken, newPassword) {
-    const res = await fetch('/auth/reset-password', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: resetToken, new_password: newPassword })
+    const res = await fetch("/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: resetToken, new_password: newPassword }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to reset password');
+      throw new Error(err.detail || "Failed to reset password");
     }
     return res.json();
   }
 
   async function updateMyEmail(email) {
-    const res = await request('PATCH', '/auth/me/email', { email: email || null });
-    if (!res.ok) throw new Error('Failed to update email');
+    const res = await request("PATCH", "/auth/me/email", {
+      email: email || null,
+    });
+    if (!res.ok) throw new Error("Failed to update email");
     return res.json();
   }
 
   async function getStats() {
-    const clientDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
-    const res = await request('GET', `/stats?client_date=${clientDate}`);
-    if (!res.ok) throw new Error('Failed to fetch stats');
+    const clientDate = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+    const res = await request("GET", `/stats?client_date=${clientDate}`);
+    if (!res.ok) throw new Error("Failed to fetch stats");
     return res.json();
   }
 
   async function getWeeklyReport(dateFrom, dateTo, userId = null) {
-    const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
-    if (userId) params.append('user_id', userId);
-    const res = await request('GET', `/reports/weekly?${params}`);
-    if (!res.ok) throw new Error('Failed to fetch report');
+    const params = new URLSearchParams({
+      date_from: dateFrom,
+      date_to: dateTo,
+    });
+    if (userId) params.append("user_id", userId);
+    const res = await request("GET", `/reports/weekly?${params}`);
+    if (!res.ok) throw new Error("Failed to fetch report");
     return res.json();
   }
 
   async function clockIn() {
-    const res = await request('POST', '/clock/in');
-    if (!res.ok) throw new Error('Failed to clock in');
+    const res = await request("POST", "/clock/in");
+    if (!res.ok) throw new Error("Failed to clock in");
     return res.json();
   }
 
   async function clockOut() {
-    const res = await request('POST', '/clock/out');
-    if (!res.ok) throw new Error('Failed to clock out');
+    const res = await request("POST", "/clock/out");
+    if (!res.ok) throw new Error("Failed to clock out");
     return res.json();
   }
 
   async function getActiveSession() {
-    const res = await request('GET', '/clock/active');
-    if (!res.ok) throw new Error('Failed to fetch session');
+    const res = await request("GET", "/clock/active");
+    if (!res.ok) throw new Error("Failed to fetch session");
     return res.json();
   }
 
+  async function getAuditLog(params = {}) {
+    const qs = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params).filter(([, v]) => v || v === 0),
+      ),
+    );
+    const res = await request("GET", `/audit-log?${qs}`);
+    if (!res.ok) throw new Error("Failed to fetch audit log");
+    const data = await res.json();
+    const total = parseInt(res.headers.get("X-Total-Count"), 10);
+    return { data, total: isNaN(total) ? data.length : total };
+  }
+
   return {
-    login, logout, me, getToken,
-    getUsers, createUser, deleteUser, setHourlyRate, updateUserProfile,
-    getTeams, createTeam, updateTeam, deleteTeam,
-    getEntries, getEntriesPaginated, createEntry, updateEntry, deleteEntry, approveEntry, rejectEntry,
-    getStats, getWeeklyReport,
-    clockIn, clockOut, getActiveSession,
-    getBasicUsers, getMeetings, createMeeting, checkMeetingConflicts, deleteMeeting, deleteMeetingSeries,
-    rescheduleMeeting, rsvpMeeting, updateMyEmail,
-    getRooms, createRoom, updateRoom, deleteRoom, getRoomOccupancy,
-    getClockSessions, updateClockSession,
-    forgotPassword, resetPassword
+    login,
+    logout,
+    me,
+    getToken,
+    getUsers,
+    createUser,
+    deleteUser,
+    setHourlyRate,
+    updateUserProfile,
+    getTeams,
+    createTeam,
+    updateTeam,
+    deleteTeam,
+    getEntries,
+    getEntriesPaginated,
+    createEntry,
+    updateEntry,
+    deleteEntry,
+    approveEntry,
+    rejectEntry,
+    getStats,
+    getWeeklyReport,
+    clockIn,
+    clockOut,
+    getActiveSession,
+    getBasicUsers,
+    getMeetings,
+    createMeeting,
+    checkMeetingConflicts,
+    deleteMeeting,
+    deleteMeetingSeries,
+    rescheduleMeeting,
+    rsvpMeeting,
+    updateMyEmail,
+    getRooms,
+    createRoom,
+    updateRoom,
+    deleteRoom,
+    getRoomOccupancy,
+    getClockSessions,
+    updateClockSession,
+    forgotPassword,
+    resetPassword,
+    getAuditLog,
   };
 })();

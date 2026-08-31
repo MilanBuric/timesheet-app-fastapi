@@ -209,6 +209,28 @@ def init_db():
             )
         """)
 
+        # Audit log — every create/update/delete across the app's business
+        # data, written explicitly at each mutation point (see
+        # audit_log.py). actor_username is a denormalized snapshot, not a
+        # join to users.username, so a log entry stays readable even after
+        # the acting user is deleted. entity_id is TEXT because most
+        # actions reference an integer row id but a cancelled recurring
+        # meeting series is identified by its (string) recurrence_group_id.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at      TEXT    NOT NULL,
+                actor_id        INTEGER,
+                actor_username  TEXT,
+                action          TEXT    NOT NULL,
+                entity_type     TEXT    NOT NULL,
+                entity_id       TEXT,
+                summary         TEXT    NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_entity_type ON audit_log(entity_type)")
+
         # Indexes for the columns actually filtered/joined on in main.py.
         # SQLite auto-indexes PRIMARY KEY and UNIQUE columns only — every
         # plain foreign key (user_id, meeting_id, etc.) needs one added

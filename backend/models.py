@@ -203,6 +203,17 @@ class RoomOccupancySlot(BaseModel):
     organizer_username: str
 
 
+class AuditLogEntry(BaseModel):
+    id: int
+    created_at: str
+    actor_id: Optional[int] = None
+    actor_username: Optional[str] = None
+    action: str
+    entity_type: str
+    entity_id: Optional[str] = None
+    summary: str
+
+
 class ForgotPasswordRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=50)
 

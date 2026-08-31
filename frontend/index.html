@@ -1,362 +1,803 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Timesheet</title>
-  <link rel="stylesheet" href="/static/css/style.css" />
-</head>
-<body>
-
-  <!-- Login screen -->
-  <div id="login-screen" class="login-screen hidden">
-    <div class="login-card">
-      <div class="login-logo">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span>Timesheet</span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Timesheet</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+  </head>
+  <body>
+    <!-- Login screen -->
+    <div id="login-screen" class="login-screen hidden">
+      <div class="login-card">
+        <div class="login-logo">
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span>Timesheet</span>
+        </div>
+        <h2 class="login-title">Sign in</h2>
+        <p class="login-subtitle">Use your intern or manager account</p>
+        <form id="login-form">
+          <div class="form-group" style="margin-bottom: 12px">
+            <label for="login-username">Username</label>
+            <input
+              type="text"
+              id="login-username"
+              placeholder="e.g. intern"
+              autocomplete="username"
+              required
+            />
+          </div>
+          <div class="form-group" style="margin-bottom: 16px">
+            <label for="login-password">Password</label>
+            <input
+              type="password"
+              id="login-password"
+              placeholder="••••••••"
+              autocomplete="current-password"
+              required
+            />
+          </div>
+          <p id="login-error" class="login-error"></p>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            style="width: 100%; height: 40px"
+          >
+            Sign in
+          </button>
+          <p style="text-align: center; margin-top: 14px">
+            <a
+              href="#"
+              onclick="
+                app.showForgotPassword();
+                return false;
+              "
+              style="font-size: 13px; color: var(--text-muted)"
+              >Forgot password?</a
+            >
+          </p>
+        </form>
       </div>
-      <h2 class="login-title">Sign in</h2>
-      <p class="login-subtitle">Use your intern or manager account</p>
-      <form id="login-form">
-        <div class="form-group" style="margin-bottom:12px;">
-          <label for="login-username">Username</label>
-          <input type="text" id="login-username" placeholder="e.g. intern" autocomplete="username" required />
+    </div>
+
+    <!-- Forgot password screen -->
+    <div id="forgot-password-screen" class="login-screen hidden">
+      <div class="login-card">
+        <div class="login-logo">
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span>Timesheet</span>
         </div>
-        <div class="form-group" style="margin-bottom:16px;">
-          <label for="login-password">Password</label>
-          <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required />
-        </div>
-        <p id="login-error" class="login-error"></p>
-        <button type="submit" class="btn btn-primary" style="width:100%;height:40px;">Sign in</button>
-        <p style="text-align:center;margin-top:14px;">
-          <a href="#" onclick="app.showForgotPassword(); return false;" style="font-size:13px;color:var(--text-muted);">Forgot password?</a>
+        <h2 class="login-title">Reset password</h2>
+        <p class="login-subtitle">
+          Enter your username and we'll email you a reset link, if an email's on
+          file.
         </p>
-      </form>
-    </div>
-  </div>
-
-  <!-- Forgot password screen -->
-  <div id="forgot-password-screen" class="login-screen hidden">
-    <div class="login-card">
-      <div class="login-logo">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span>Timesheet</span>
-      </div>
-      <h2 class="login-title">Reset password</h2>
-      <p class="login-subtitle">Enter your username and we'll email you a reset link, if an email's on file.</p>
-      <div class="form-group" style="margin-bottom:16px;">
-        <label for="forgot-username">Username</label>
-        <input type="text" id="forgot-username" placeholder="e.g. intern" autocomplete="username" />
-      </div>
-      <p id="forgot-password-message" class="login-error" style="color:var(--text-muted);"></p>
-      <button class="btn btn-primary" style="width:100%;height:40px;" onclick="app.submitForgotPassword()">Send reset link</button>
-      <p style="text-align:center;margin-top:14px;">
-        <a href="#" onclick="app.showLoginFromForgot(); return false;" style="font-size:13px;color:var(--text-muted);">Back to sign in</a>
-      </p>
-    </div>
-  </div>
-
-  <!-- Reset password screen (reached via emailed link with ?reset_token=...) -->
-  <div id="reset-password-screen" class="login-screen hidden">
-    <div class="login-card">
-      <div class="login-logo">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span>Timesheet</span>
-      </div>
-      <h2 class="login-title">Choose a new password</h2>
-      <div class="form-group" style="margin-bottom:16px;">
-        <label for="reset-new-password">New password</label>
-        <input type="password" id="reset-new-password" placeholder="min. 6 characters" autocomplete="new-password" />
-      </div>
-      <p id="reset-password-message" class="login-error"></p>
-      <button class="btn btn-primary" style="width:100%;height:40px;" onclick="app.submitResetPassword()">Set new password</button>
-      <p style="text-align:center;margin-top:14px;">
-        <a href="#" onclick="app.showLoginFromForgot(); return false;" style="font-size:13px;color:var(--text-muted);">Back to sign in</a>
-      </p>
-    </div>
-  </div>
-
-  <!-- App screen -->
-  <div id="app-screen" class="layout hidden">
-    <aside class="sidebar">
-      <div class="sidebar-logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span>Timesheet</span>
-      </div>
-      <nav class="sidebar-nav">
-        <a href="#" class="nav-item active" data-view="dashboard">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-          Dashboard
-        </a>
-        <a href="#" class="nav-item" data-view="entries">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="3" cy="18" r="1"/></svg>
-          Entries
-        </a>
-        <a href="#" class="nav-item" data-view="report">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-          Report
-        </a>
-        <a href="#" class="nav-item" data-view="meetings">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
-          Meetings
-        </a>
-        <a href="#" class="nav-item manager-only hidden" data-view="users">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          Users
-        </a>
-      </nav>
-      <div class="sidebar-footer">
-        <div class="user-info">
-          <span id="current-username" class="user-name"></span>
-          <span id="current-role" class="user-role"></span>
+        <div class="form-group" style="margin-bottom: 16px">
+          <label for="forgot-username">Username</label>
+          <input
+            type="text"
+            id="forgot-username"
+            placeholder="e.g. intern"
+            autocomplete="username"
+          />
         </div>
-        <div style="display:flex;gap:6px;flex-shrink:0;">
-          <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode">
-            <svg id="theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            <svg id="theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          </button>
-          <button id="logout-btn" class="btn-icon danger" title="Sign out">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          </button>
-        </div>
-      </div>
-    </aside>
-    <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
-
-    <main class="main">
-      <header class="topbar">
-        <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Open menu">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <p
+          id="forgot-password-message"
+          class="login-error"
+          style="color: var(--text-muted)"
+        ></p>
+        <button
+          class="btn btn-primary"
+          style="width: 100%; height: 40px"
+          onclick="app.submitForgotPassword()"
+        >
+          Send reset link
         </button>
-        <div>
-          <h1 id="view-title">Dashboard</h1>
-          <p id="today-label" class="topbar-date"></p>
-        </div>
-        <div class="timer-block intern-only">
-          <span class="timer-display" id="timer-display">00:00:00</span>
-          <button class="btn btn-clock" id="clock-btn">Clock in</button>
-        </div>
-      </header>
+        <p style="text-align: center; margin-top: 14px">
+          <a
+            href="#"
+            onclick="
+              app.showLoginFromForgot();
+              return false;
+            "
+            style="font-size: 13px; color: var(--text-muted)"
+            >Back to sign in</a
+          >
+        </p>
+      </div>
+    </div>
 
-      <!-- Dashboard view -->
-      <section id="view-dashboard">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <p class="stat-label">Hours today</p>
-            <p class="stat-value" id="stat-today">—</p>
-          </div>
-          <div class="stat-card">
-            <p class="stat-label">Hours this week</p>
-            <p class="stat-value" id="stat-week">—</p>
-          </div>
-          <div class="stat-card">
-            <p class="stat-label">Total entries</p>
-            <p class="stat-value" id="stat-entries">—</p>
-          </div>
+    <!-- Reset password screen (reached via emailed link with ?reset_token=...) -->
+    <div id="reset-password-screen" class="login-screen hidden">
+      <div class="login-card">
+        <div class="login-logo">
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span>Timesheet</span>
         </div>
-        <div class="card intern-only">
-          <h2 class="card-title">Log a task</h2>
-          <p class="card-subtitle">Pay is calculated from clocking in/out, not from this log. This is a record of what you worked on, for review — the time estimate below is informational only.</p>
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="entry-date">Date</label>
-              <input type="date" id="entry-date" />
-            </div>
-            <div class="form-group">
-              <label for="entry-hours">Est. time spent</label>
-              <input type="number" id="entry-hours" min="0.01" max="24" step="0.01" placeholder="e.g. 2.5" />
-            </div>
-            <div class="form-group">
-              <label for="entry-category">Category</label>
-              <select id="entry-category">
-                <option>Self-study</option>
-                <option>Meeting</option>
-                <option>Other</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="entry-activity">Activity</label>
-              <input type="text" id="entry-activity" placeholder="What did you work on?" />
-            </div>
-          </div>
-          <div class="form-actions">
-            <button class="btn btn-primary" onclick="app.addEntry()">Log task</button>
-          </div>
+        <h2 class="login-title">Choose a new password</h2>
+        <div class="form-group" style="margin-bottom: 16px">
+          <label for="reset-new-password">New password</label>
+          <input
+            type="password"
+            id="reset-new-password"
+            placeholder="min. 6 characters"
+            autocomplete="new-password"
+          />
         </div>
-        <div class="card">
-          <h2 class="card-title">Recent entries</h2>
-          <div id="recent-entries-container"></div>
-        </div>
-      </section>
+        <p id="reset-password-message" class="login-error"></p>
+        <button
+          class="btn btn-primary"
+          style="width: 100%; height: 40px"
+          onclick="app.submitResetPassword()"
+        >
+          Set new password
+        </button>
+        <p style="text-align: center; margin-top: 14px">
+          <a
+            href="#"
+            onclick="
+              app.showLoginFromForgot();
+              return false;
+            "
+            style="font-size: 13px; color: var(--text-muted)"
+            >Back to sign in</a
+          >
+        </p>
+      </div>
+    </div>
 
-      <!-- Entries view -->
-      <section id="view-entries" class="hidden">
-        <div class="card">
-          <div class="quick-filters">
-            <span class="quick-filter-label">Quick:</span>
-            <button class="btn btn-quick" onclick="app.quickFilter('today')">Today</button>
-            <button class="btn btn-quick" onclick="app.quickFilter('week')">This week</button>
-            <button class="btn btn-quick" onclick="app.quickFilter('month')">This month</button>
-            <button class="btn btn-quick" onclick="app.quickFilter('all')">All</button>
-          </div>
-          <div class="filters">
-            <div class="form-group">
-              <label for="filter-from">From</label>
-              <input type="date" id="filter-from" />
-            </div>
-            <div class="form-group">
-              <label for="filter-to">To</label>
-              <input type="date" id="filter-to" />
-            </div>
-            <div class="form-group">
-              <label for="filter-category">Category</label>
-              <select id="filter-category">
-                <option value="">All categories</option>
-                <option>Self-study</option>
-                <option>Meeting</option>
-                <option>Other</option>
-              </select>
-            </div>
-            <button class="btn" onclick="app.loadEntries()">Filter</button>
-            <button class="btn" onclick="app.exportCSV()">Export CSV</button>
-          </div>
-          <div id="entries-summary" class="entries-summary hidden"></div>
-          <div id="all-entries-container"></div>
-          <div id="entries-pagination" class="entries-pagination"></div>
+    <!-- App screen -->
+    <div id="app-screen" class="layout hidden">
+      <aside class="sidebar">
+        <div class="sidebar-logo">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span>Timesheet</span>
         </div>
-      </section>
-
-      <!-- Report view -->
-      <section id="view-report" class="hidden">
-        <div class="card no-print">
-          <div class="report-controls">
-            <div class="tab-group">
-              <button class="tab active" data-period="week" onclick="app.setReportPeriod('week')">Weekly</button>
-              <button class="tab" data-period="month" onclick="app.setReportPeriod('month')">Monthly</button>
-            </div>
-            <div class="report-nav">
-              <button class="btn-icon" onclick="app.shiftPeriod(-1)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-              </button>
-              <span id="report-period-label" class="period-label"></span>
-              <button class="btn-icon" onclick="app.shiftPeriod(1)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-              </button>
-            </div>
-            <button class="btn" onclick="app.printReport()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;margin-right:6px;vertical-align:middle"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-              Export PDF
+        <nav class="sidebar-nav">
+          <a href="#" class="nav-item active" data-view="dashboard">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+            </svg>
+            Dashboard
+          </a>
+          <a href="#" class="nav-item" data-view="entries">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <circle cx="3" cy="6" r="1" />
+              <circle cx="3" cy="12" r="1" />
+              <circle cx="3" cy="18" r="1" />
+            </svg>
+            Entries
+          </a>
+          <a href="#" class="nav-item" data-view="report">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            Report
+          </a>
+          <a href="#" class="nav-item" data-view="meetings">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+            </svg>
+            Meetings
+          </a>
+          <a href="#" class="nav-item manager-only hidden" data-view="users">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            Users
+          </a>
+          <a
+            href="#"
+            class="nav-item manager-only hidden"
+            data-view="audit-log"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="9" y1="13" x2="15" y2="13" />
+              <line x1="9" y1="17" x2="15" y2="17" />
+            </svg>
+            Audit Log
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="user-info">
+            <span id="current-username" class="user-name"></span>
+            <span id="current-role" class="user-role"></span>
+          </div>
+          <div style="display: flex; gap: 6px; flex-shrink: 0">
+            <button
+              id="theme-toggle"
+              class="theme-toggle"
+              title="Toggle dark mode"
+            >
+              <svg
+                id="theme-icon-sun"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+              <svg
+                id="theme-icon-moon"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="hidden"
+              >
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            </button>
+            <button id="logout-btn" class="btn-icon danger" title="Sign out">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
             </button>
           </div>
         </div>
-        <div id="report-print-area">
-          <div id="report-summary" class="report-summary-grid"></div>
-          <div id="report-category-table"></div>
-          <div id="report-container"></div>
-        </div>
-      </section>
+      </aside>
+      <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
 
-      <!-- Meetings view -->
-      <section id="view-meetings" class="hidden">
-        <div class="card">
-          <h2 class="card-title">Meeting invite email</h2>
-          <p class="card-subtitle">Get an email with one-click Accept/Decline links whenever you're invited.</p>
-          <div class="form-grid">
-            <div class="form-group" style="grid-column:1/-1;">
-              <label for="my-email">Your email</label>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <input type="email" id="my-email" placeholder="you@example.com" style="flex:1;" />
-                <button class="btn btn-primary" onclick="app.saveMyEmail()">Save</button>
-                <span id="email-save-status" class="email-save-status"></span>
+      <main class="main">
+        <header class="topbar">
+          <button
+            id="sidebar-toggle"
+            class="sidebar-toggle-btn"
+            aria-label="Open menu"
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+          <div>
+            <h1 id="view-title">Dashboard</h1>
+            <p id="today-label" class="topbar-date"></p>
+          </div>
+          <div class="timer-block intern-only">
+            <span class="timer-display" id="timer-display">00:00:00</span>
+            <button class="btn btn-clock" id="clock-btn">Clock in</button>
+          </div>
+        </header>
+
+        <!-- Dashboard view -->
+        <section id="view-dashboard">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <p class="stat-label">Hours today</p>
+              <p class="stat-value" id="stat-today">—</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-label">Hours this week</p>
+              <p class="stat-value" id="stat-week">—</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-label">Total entries</p>
+              <p class="stat-value" id="stat-entries">—</p>
+            </div>
+          </div>
+          <div class="card intern-only">
+            <h2 class="card-title">Log a task</h2>
+            <p class="card-subtitle">
+              Pay is calculated from clocking in/out, not from this log. This is
+              a record of what you worked on, for review — the time estimate
+              below is informational only.
+            </p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="entry-date">Date</label>
+                <input type="date" id="entry-date" />
+              </div>
+              <div class="form-group">
+                <label for="entry-hours">Est. time spent</label>
+                <input
+                  type="number"
+                  id="entry-hours"
+                  min="0.01"
+                  max="24"
+                  step="0.01"
+                  placeholder="e.g. 2.5"
+                />
+              </div>
+              <div class="form-group">
+                <label for="entry-category">Category</label>
+                <select id="entry-category">
+                  <option>Self-study</option>
+                  <option>Meeting</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="entry-activity">Activity</label>
+                <input
+                  type="text"
+                  id="entry-activity"
+                  placeholder="What did you work on?"
+                />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" onclick="app.addEntry()">
+                Log task
+              </button>
+            </div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Recent entries</h2>
+            <div id="recent-entries-container"></div>
+          </div>
+        </section>
+
+        <!-- Entries view -->
+        <section id="view-entries" class="hidden">
+          <div class="card">
+            <div class="quick-filters">
+              <span class="quick-filter-label">Quick:</span>
+              <button class="btn btn-quick" onclick="app.quickFilter('today')">
+                Today
+              </button>
+              <button class="btn btn-quick" onclick="app.quickFilter('week')">
+                This week
+              </button>
+              <button class="btn btn-quick" onclick="app.quickFilter('month')">
+                This month
+              </button>
+              <button class="btn btn-quick" onclick="app.quickFilter('all')">
+                All
+              </button>
+            </div>
+            <div class="filters">
+              <div class="form-group">
+                <label for="filter-from">From</label>
+                <input type="date" id="filter-from" />
+              </div>
+              <div class="form-group">
+                <label for="filter-to">To</label>
+                <input type="date" id="filter-to" />
+              </div>
+              <div class="form-group">
+                <label for="filter-category">Category</label>
+                <select id="filter-category">
+                  <option value="">All categories</option>
+                  <option>Self-study</option>
+                  <option>Meeting</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <button class="btn" onclick="app.loadEntries()">Filter</button>
+              <button class="btn" onclick="app.exportCSV()">Export CSV</button>
+            </div>
+            <div id="entries-summary" class="entries-summary hidden"></div>
+            <div id="all-entries-container"></div>
+            <div id="entries-pagination" class="entries-pagination"></div>
+          </div>
+        </section>
+
+        <!-- Report view -->
+        <section id="view-report" class="hidden">
+          <div class="card no-print">
+            <div class="report-controls">
+              <div class="tab-group">
+                <button
+                  class="tab active"
+                  data-period="week"
+                  onclick="app.setReportPeriod('week')"
+                >
+                  Weekly
+                </button>
+                <button
+                  class="tab"
+                  data-period="month"
+                  onclick="app.setReportPeriod('month')"
+                >
+                  Monthly
+                </button>
+              </div>
+              <div class="report-nav">
+                <button class="btn-icon" onclick="app.shiftPeriod(-1)">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
+                <span id="report-period-label" class="period-label"></span>
+                <button class="btn-icon" onclick="app.shiftPeriod(1)">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              </div>
+              <button class="btn" onclick="app.printReport()">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  style="
+                    display: inline;
+                    margin-right: 6px;
+                    vertical-align: middle;
+                  "
+                >
+                  <polyline points="6 9 6 2 18 2 18 9" />
+                  <path
+                    d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
+                  />
+                  <rect x="6" y="14" width="12" height="8" />
+                </svg>
+                Export PDF
+              </button>
+            </div>
+          </div>
+          <div id="report-print-area">
+            <div id="report-summary" class="report-summary-grid"></div>
+            <div id="report-category-table"></div>
+            <div id="report-container"></div>
+          </div>
+        </section>
+
+        <!-- Meetings view -->
+        <section id="view-meetings" class="hidden">
+          <div class="card">
+            <h2 class="card-title">Meeting invite email</h2>
+            <p class="card-subtitle">
+              Get an email with one-click Accept/Decline links whenever you're
+              invited.
+            </p>
+            <div class="form-grid">
+              <div class="form-group" style="grid-column: 1/-1">
+                <label for="my-email">Your email</label>
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <input
+                    type="email"
+                    id="my-email"
+                    placeholder="you@example.com"
+                    style="flex: 1"
+                  />
+                  <button class="btn btn-primary" onclick="app.saveMyEmail()">
+                    Save
+                  </button>
+                  <span id="email-save-status" class="email-save-status"></span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="card">
-          <div class="form-group" style="margin-bottom:0;">
-            <label for="meeting-search">Search meetings</label>
-            <input type="text" id="meeting-search" placeholder="Search by title, room, or attendee…"
-                   oninput="app.onMeetingSearchInput(this.value)" />
-          </div>
-          <div id="meeting-search-results" class="meeting-search-results hidden"></div>
-        </div>
-
-        <div class="card">
-          <h2 class="card-title">Room availability</h2>
-          <p class="card-subtitle">Check when a room is free before you schedule — visible to everyone, not just managers.</p>
-          <div class="form-group" style="margin-bottom:12px;max-width:320px;">
-            <label for="availability-room-select">Room</label>
-            <select id="availability-room-select" onchange="app.loadMeetingsRoomAvailability(this.value)">
-              <option value="">Select a room…</option>
-            </select>
-          </div>
-          <div id="meetings-room-occupancy-list"></div>
-        </div>
-
-        <div class="card calendar-card" id="meetings-calendar-card">
-          <div class="calendar-header">
-            <button class="btn-icon" onclick="app.shiftCalendarMonth(-1)" title="Previous month">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <h2 class="card-title calendar-month-label" id="calendar-month-label">Month Year</h2>
-            <button class="btn-icon" onclick="app.shiftCalendarMonth(1)" title="Next month">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-          </div>
-          <div class="calendar-scroll-wrap">
-            <div class="calendar-weekdays">
-              <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+          <div class="card">
+            <div class="form-group" style="margin-bottom: 0">
+              <label for="meeting-search">Search meetings</label>
+              <input
+                type="text"
+                id="meeting-search"
+                placeholder="Search by title, room, or attendee…"
+                oninput="app.onMeetingSearchInput(this.value)"
+              />
             </div>
-            <div id="calendar-grid" class="calendar-grid"></div>
+            <div
+              id="meeting-search-results"
+              class="meeting-search-results hidden"
+            ></div>
           </div>
-        </div>
 
-        <div class="panel-overlay hidden" id="meeting-panel-overlay" onclick="app.closeMeetingPanel()"></div>
-        <div class="meeting-panel hidden" id="meeting-panel">
-          <div class="meeting-panel-header">
-            <h2 class="card-title" id="sidebar-date-label" style="margin:0;">Meetings</h2>
-            <button class="btn-icon" onclick="app.closeMeetingPanel()" title="Close">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+          <div class="card">
+            <h2 class="card-title">Room availability</h2>
+            <p class="card-subtitle">
+              Check when a room is free before you schedule — visible to
+              everyone, not just managers.
+            </p>
+            <div
+              class="form-group"
+              style="margin-bottom: 12px; max-width: 320px"
+            >
+              <label for="availability-room-select">Room</label>
+              <select
+                id="availability-room-select"
+                onchange="app.loadMeetingsRoomAvailability(this.value)"
+              >
+                <option value="">Select a room…</option>
+              </select>
+            </div>
+            <div id="meetings-room-occupancy-list"></div>
           </div>
-          <div class="meeting-panel-body">
-            <div id="rooms-booked-today"></div>
-            <div id="sidebar-meetings-list"></div>
 
-            <div class="panel-divider"></div>
+          <div class="card calendar-card" id="meetings-calendar-card">
+            <div class="calendar-header">
+              <button
+                class="btn-icon"
+                onclick="app.shiftCalendarMonth(-1)"
+                title="Previous month"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+              <h2
+                class="card-title calendar-month-label"
+                id="calendar-month-label"
+              >
+                Month Year
+              </h2>
+              <button
+                class="btn-icon"
+                onclick="app.shiftCalendarMonth(1)"
+                title="Next month"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+            <div class="calendar-scroll-wrap">
+              <div class="calendar-weekdays">
+                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span
+                ><span>Thu</span><span>Fri</span><span>Sat</span>
+              </div>
+              <div id="calendar-grid" class="calendar-grid"></div>
+            </div>
+          </div>
 
-            <h2 class="card-title">Schedule a meeting</h2>
+          <div
+            class="panel-overlay hidden"
+            id="meeting-panel-overlay"
+            onclick="app.closeMeetingPanel()"
+          ></div>
+          <div class="meeting-panel hidden" id="meeting-panel">
+            <div class="meeting-panel-header">
+              <h2 class="card-title" id="sidebar-date-label" style="margin: 0">
+                Meetings
+              </h2>
+              <button
+                class="btn-icon"
+                onclick="app.closeMeetingPanel()"
+                title="Close"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div class="meeting-panel-body">
+              <div id="rooms-booked-today"></div>
+              <div id="sidebar-meetings-list"></div>
+
+              <div class="panel-divider"></div>
+
+              <h2 class="card-title">Schedule a meeting</h2>
               <div class="form-grid-single">
                 <div class="form-group">
                   <label for="meeting-title">Title</label>
-                  <input type="text" id="meeting-title" placeholder="e.g. Sprint planning" />
+                  <input
+                    type="text"
+                    id="meeting-title"
+                    placeholder="e.g. Sprint planning"
+                  />
                 </div>
                 <div class="form-group">
                   <label for="meeting-date">Date</label>
-                  <input type="date" id="meeting-date" onchange="app.checkAttendeeConflictsLive()" />
+                  <input
+                    type="date"
+                    id="meeting-date"
+                    onchange="app.checkAttendeeConflictsLive()"
+                  />
                 </div>
                 <div class="form-row-2">
                   <div class="form-group">
                     <label for="meeting-start">Start time</label>
-                    <input type="time" id="meeting-start" onchange="app.checkAttendeeConflictsLive()" />
+                    <input
+                      type="time"
+                      id="meeting-start"
+                      onchange="app.checkAttendeeConflictsLive()"
+                    />
                   </div>
                   <div class="form-group">
                     <label for="meeting-end">End time</label>
-                    <input type="time" id="meeting-end" onchange="app.checkAttendeeConflictsLive()" />
+                    <input
+                      type="time"
+                      id="meeting-end"
+                      onchange="app.checkAttendeeConflictsLive()"
+                    />
                   </div>
                 </div>
                 <div class="form-group">
                   <label>Repeats</label>
-                  <select id="meeting-recurrence" onchange="app.toggleRecurrence()">
+                  <select
+                    id="meeting-recurrence"
+                    onchange="app.toggleRecurrence()"
+                  >
                     <option value="none">Does not repeat</option>
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
@@ -364,7 +805,10 @@
                     <option value="monthly">Monthly</option>
                   </select>
                 </div>
-                <div class="form-group hidden" id="meeting-recurrence-until-group">
+                <div
+                  class="form-group hidden"
+                  id="meeting-recurrence-until-group"
+                >
                   <label for="meeting-recurrence-until">Repeat until</label>
                   <input type="date" id="meeting-recurrence-until" />
                 </div>
@@ -372,152 +816,269 @@
                   <label>Location</label>
                   <div class="location-toggle">
                     <label class="location-option">
-                      <input type="radio" name="meeting-location-type" value="online" checked onchange="app.toggleMeetingLocation()" />
+                      <input
+                        type="radio"
+                        name="meeting-location-type"
+                        value="online"
+                        checked
+                        onchange="app.toggleMeetingLocation()"
+                      />
                       <span>💻 Online</span>
                     </label>
                     <label class="location-option">
-                      <input type="radio" name="meeting-location-type" value="in_person" onchange="app.toggleMeetingLocation()" />
+                      <input
+                        type="radio"
+                        name="meeting-location-type"
+                        value="in_person"
+                        onchange="app.toggleMeetingLocation()"
+                      />
                       <span>📍 In person</span>
                     </label>
                   </div>
                 </div>
                 <div class="form-group" id="meeting-link-group">
                   <label class="checkbox-label">
-                    <input type="checkbox" id="meeting-use-google-meet" onchange="app.toggleGoogleMeetOption()" />
+                    <input
+                      type="checkbox"
+                      id="meeting-use-google-meet"
+                      onchange="app.toggleGoogleMeetOption()"
+                    />
                     <span>🎥 Auto-generate a Google Meet link</span>
                   </label>
-                  <label for="meeting-link" id="meeting-link-label">Meeting link (optional)</label>
-                  <input type="url" id="meeting-link" placeholder="e.g. https://meet.google.com/..." />
+                  <label for="meeting-link" id="meeting-link-label"
+                    >Meeting link (optional)</label
+                  >
+                  <input
+                    type="url"
+                    id="meeting-link"
+                    placeholder="e.g. https://meet.google.com/..."
+                  />
                 </div>
                 <div class="form-group hidden" id="meeting-room-group">
                   <label for="meeting-room">Room</label>
-                  <input type="text" id="meeting-room" list="room-options" placeholder="e.g. Conference Room B" />
+                  <input
+                    type="text"
+                    id="meeting-room"
+                    list="room-options"
+                    placeholder="e.g. Conference Room B"
+                  />
                   <datalist id="room-options"></datalist>
                 </div>
                 <div class="form-group">
                   <label for="meeting-description">Description</label>
-                  <input type="text" id="meeting-description" placeholder="Optional details" />
+                  <input
+                    type="text"
+                    id="meeting-description"
+                    placeholder="Optional details"
+                  />
                 </div>
                 <div class="form-group">
                   <label>Attendees</label>
-                  <div id="meeting-attendees-list" class="attendees-list" onchange="app.checkAttendeeConflictsLive()"></div>
+                  <div
+                    id="meeting-attendees-list"
+                    class="attendees-list"
+                    onchange="app.checkAttendeeConflictsLive()"
+                  ></div>
                   <div id="attendee-conflict-warning"></div>
                 </div>
               </div>
               <div class="form-actions">
-                <button class="btn btn-primary" onclick="app.scheduleMeeting()">Schedule meeting</button>
+                <button class="btn btn-primary" onclick="app.scheduleMeeting()">
+                  Schedule meeting
+                </button>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Users view (manager only) -->
+        <section id="view-users" class="hidden">
+          <div class="card">
+            <h2 class="card-title">Employees</h2>
+            <p class="card-subtitle">
+              Set each person's title, team, and (for interns) hourly rate.
+              Title and team are shown next to names when scheduling a meeting.
+            </p>
+            <div id="users-container"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Teams</h2>
+            <p class="card-subtitle">
+              Teams configured here are assignable to any employee above, and
+              group people consistently for org clarity.
+            </p>
+            <div id="teams-container"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Meeting rooms</h2>
+            <p class="card-subtitle">
+              Rooms configured here show up as suggestions (with
+              capacity/equipment) when scheduling an in-person meeting.
+            </p>
+            <div id="rooms-container"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Clock sessions</h2>
+            <p class="card-subtitle">
+              Pay is calculated entirely from these — clocking in/out, not task
+              logs. Sessions flagged "Auto-closed" mean someone likely forgot to
+              clock out; review and correct them here.
+            </p>
+            <div id="clock-sessions-container"></div>
+          </div>
+        </section>
+
+        <!-- Audit log view -->
+        <section id="view-audit-log" class="hidden">
+          <div class="card">
+            <h2 class="card-title">Audit log</h2>
+            <p class="card-subtitle">
+              Every create, update, and delete across entries, users, teams,
+              rooms, meetings, and clock sessions — newest first.
+            </p>
+            <div class="filters">
+              <div class="form-group">
+                <label for="audit-filter-entity">Entity</label>
+                <select id="audit-filter-entity">
+                  <option value="">All entities</option>
+                  <option value="entry">Entries</option>
+                  <option value="user">Users</option>
+                  <option value="team">Teams</option>
+                  <option value="room">Rooms</option>
+                  <option value="meeting">Meetings</option>
+                  <option value="clock_session">Clock sessions</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="audit-filter-actor">Actor</label>
+                <input
+                  type="text"
+                  id="audit-filter-actor"
+                  placeholder="Username..."
+                />
+              </div>
+              <div class="form-group">
+                <label for="audit-filter-from">From</label>
+                <input type="date" id="audit-filter-from" />
+              </div>
+              <div class="form-group">
+                <label for="audit-filter-to">To</label>
+                <input type="date" id="audit-filter-to" />
+              </div>
+              <button class="btn" onclick="app.loadAuditLog()">Filter</button>
+            </div>
+            <div id="audit-log-container"></div>
+            <div id="audit-log-pagination" class="entries-pagination"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Edit modal -->
+    <div class="modal-overlay hidden" id="edit-modal">
+      <div class="modal">
+        <h2 class="card-title">Edit entry</h2>
+        <input type="hidden" id="edit-id" />
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="edit-date">Date</label>
+            <input type="date" id="edit-date" />
+          </div>
+          <div class="form-group">
+            <label for="edit-hours">Hours</label>
+            <input
+              type="number"
+              id="edit-hours"
+              min="0.5"
+              max="24"
+              step="0.5"
+            />
+          </div>
+          <div class="form-group">
+            <label for="edit-category">Category</label>
+            <select id="edit-category">
+              <option>Self-study</option>
+              <option>Meeting</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-activity">Activity</label>
+            <input type="text" id="edit-activity" />
           </div>
         </div>
-      </section>
-
-      <!-- Users view (manager only) -->
-      <section id="view-users" class="hidden">
-        <div class="card">
-          <h2 class="card-title">Employees</h2>
-          <p class="card-subtitle">Set each person's title, team, and (for interns) hourly rate. Title and team are shown next to names when scheduling a meeting.</p>
-          <div id="users-container"></div>
+        <div class="form-actions">
+          <button class="btn" onclick="app.closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="app.saveEdit()">
+            Save changes
+          </button>
         </div>
-        <div class="card">
-          <h2 class="card-title">Teams</h2>
-          <p class="card-subtitle">Teams configured here are assignable to any employee above, and group people consistently for org clarity.</p>
-          <div id="teams-container"></div>
-        </div>
-        <div class="card">
-          <h2 class="card-title">Meeting rooms</h2>
-          <p class="card-subtitle">Rooms configured here show up as suggestions (with capacity/equipment) when scheduling an in-person meeting.</p>
-          <div id="rooms-container"></div>
-        </div>
-        <div class="card">
-          <h2 class="card-title">Clock sessions</h2>
-          <p class="card-subtitle">Pay is calculated entirely from these — clocking in/out, not task logs. Sessions flagged "Auto-closed" mean someone likely forgot to clock out; review and correct them here.</p>
-          <div id="clock-sessions-container"></div>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <!-- Edit modal -->
-  <div class="modal-overlay hidden" id="edit-modal">
-    <div class="modal">
-      <h2 class="card-title">Edit entry</h2>
-      <input type="hidden" id="edit-id" />
-      <div class="form-grid">
-        <div class="form-group">
-          <label for="edit-date">Date</label>
-          <input type="date" id="edit-date" />
-        </div>
-        <div class="form-group">
-          <label for="edit-hours">Hours</label>
-          <input type="number" id="edit-hours" min="0.5" max="24" step="0.5" />
-        </div>
-        <div class="form-group">
-          <label for="edit-category">Category</label>
-          <select id="edit-category">
-            <option>Self-study</option>
-            <option>Meeting</option>
-            <option>Other</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="edit-activity">Activity</label>
-          <input type="text" id="edit-activity" />
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn" onclick="app.closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="app.saveEdit()">Save changes</button>
       </div>
     </div>
-  </div>
 
-  <!-- Reject modal -->
-  <div class="modal-overlay hidden" id="reject-modal">
-    <div class="modal">
-      <h2 class="card-title">Reject entry</h2>
-      <input type="hidden" id="reject-entry-id" />
-      <div class="form-group">
-        <label for="reject-reason">Reason</label>
-        <textarea id="reject-reason" class="reject-textarea" rows="3" placeholder="Let the intern know why this was rejected (required)..."></textarea>
-      </div>
-      <div class="form-actions">
-        <button class="btn" onclick="app.closeRejectModal()">Cancel</button>
-        <button class="btn btn-danger" onclick="app.confirmReject()">Reject entry</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Reschedule meeting modal -->
-  <div class="modal-overlay hidden" id="reschedule-modal">
-    <div class="modal">
-      <h2 class="card-title">Reschedule <span id="reschedule-title-label"></span></h2>
-      <input type="hidden" id="reschedule-meeting-id" />
-      <div class="form-group" style="margin-bottom:12px;">
-        <label for="reschedule-date">Date</label>
-        <input type="date" id="reschedule-date" />
-      </div>
-      <div class="form-row-2">
+    <!-- Reject modal -->
+    <div class="modal-overlay hidden" id="reject-modal">
+      <div class="modal">
+        <h2 class="card-title">Reject entry</h2>
+        <input type="hidden" id="reject-entry-id" />
         <div class="form-group">
-          <label for="reschedule-start">Start time</label>
-          <input type="time" id="reschedule-start" />
+          <label for="reject-reason">Reason</label>
+          <textarea
+            id="reject-reason"
+            class="reject-textarea"
+            rows="3"
+            placeholder="Let the intern know why this was rejected (required)..."
+          ></textarea>
         </div>
-        <div class="form-group">
-          <label for="reschedule-end">End time</label>
-          <input type="time" id="reschedule-end" />
+        <div class="form-actions">
+          <button class="btn" onclick="app.closeRejectModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="app.confirmReject()">
+            Reject entry
+          </button>
         </div>
       </div>
-      <p class="meeting-location-info" style="margin-top:12px;">Guests will be notified and asked to RSVP again.</p>
-      <div class="form-actions" style="margin-top:12px;">
-        <button class="btn" onclick="app.closeRescheduleForm()">Cancel</button>
-        <button class="btn btn-primary" onclick="app.submitReschedule()">Save new time</button>
+    </div>
+
+    <!-- Reschedule meeting modal -->
+    <div class="modal-overlay hidden" id="reschedule-modal">
+      <div class="modal">
+        <h2 class="card-title">
+          Reschedule <span id="reschedule-title-label"></span>
+        </h2>
+        <input type="hidden" id="reschedule-meeting-id" />
+        <div class="form-group" style="margin-bottom: 12px">
+          <label for="reschedule-date">Date</label>
+          <input type="date" id="reschedule-date" />
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="reschedule-start">Start time</label>
+            <input type="time" id="reschedule-start" />
+          </div>
+          <div class="form-group">
+            <label for="reschedule-end">End time</label>
+            <input type="time" id="reschedule-end" />
+          </div>
+        </div>
+        <p class="meeting-location-info" style="margin-top: 12px">
+          Guests will be notified and asked to RSVP again.
+        </p>
+        <div class="form-actions" style="margin-top: 12px">
+          <button class="btn" onclick="app.closeRescheduleForm()">
+            Cancel
+          </button>
+          <button class="btn btn-primary" onclick="app.submitReschedule()">
+            Save new time
+          </button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <script src="/static/js/api.js"></script>
-  <script src="/static/js/timer.js"></script>
-  <script src="/static/js/entries.js"></script>
-  <script src="/static/js/meetings.js"></script>
-  <script src="/static/js/app.js"></script>
-</body>
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/timer.js"></script>
+    <script src="/static/js/entries.js"></script>
+    <script src="/static/js/meetings.js"></script>
+    <script src="/static/js/audit.js"></script>
+    <script src="/static/js/app.js"></script>
+  </body>
 </html>

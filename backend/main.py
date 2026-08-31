@@ -15,12 +15,13 @@ from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     RSVPRequest, MeetingReschedule, RoomCreate, RoomUpdate, RoomResponse,
                     RoomOccupancySlot, ForgotPasswordRequest, ResetPasswordRequest,
                     ClockSessionResponse, ClockSessionUpdate, UpdateUserProfileRequest,
-                    TeamCreate, TeamUpdate, TeamResponse)
+                    TeamCreate, TeamUpdate, TeamResponse, AuditLogEntry)
 from auth import verify_password, create_token, get_current_user, require_manager
 import email_utils
 import google_meet
 import reminders
 import clock_auto_close
+import audit_log
 
 app = FastAPI(title="Timesheet API")
 
@@ -217,6 +218,8 @@ def create_user(body: CreateUserRequest, current_user=Depends(require_manager)):
             (body.username, hash_password(body.password), body.role, body.hourly_rate, body.title, body.team_id)
         )
         conn.commit()
+        audit_log.record(conn, current_user, "user.create", "user", cursor.lastrowid,
+                          f"Created user \"{body.username}\" (role={body.role})")
         row = conn.execute(
             """SELECT u.id, u.username, u.role, u.hourly_rate, u.email, u.title, u.team_id, t.name as team_name
                FROM users u LEFT JOIN teams t ON u.team_id = t.id WHERE u.id = ?""",
@@ -238,6 +241,8 @@ def delete_user(user_id: int, current_user=Depends(require_manager)):
         conn.execute("DELETE FROM clock_sessions WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
+        audit_log.record(conn, current_user, "user.delete", "user", user_id,
+                          f"Deleted user \"{existing['username']}\" (role={existing['role']}) — their entries and clock sessions were removed too")
 
 
 @app.get("/users/basic", response_model=list[BasicUser])
@@ -268,6 +273,11 @@ def update_user_profile(user_id: int, body: UpdateUserProfileRequest, current_us
             (body.title, body.team_id, user_id)
         )
         conn.commit()
+        audit_log.record(
+            conn, current_user, "user.update_profile", "user", user_id,
+            f"Updated profile for \"{user['username']}\": title {user['title']!r} → {body.title!r}, "
+            f"team_id {user['team_id']} → {body.team_id}"
+        )
         row = conn.execute(
             """SELECT u.id, u.username, u.role, u.hourly_rate, u.email, u.title, u.team_id, t.name as team_name
                FROM users u LEFT JOIN teams t ON u.team_id = t.id WHERE u.id = ?""",
@@ -287,6 +297,10 @@ def set_hourly_rate(user_id: int, body: UpdateRateRequest, current_user=Depends(
             (body.hourly_rate, user_id)
         )
         conn.commit()
+        audit_log.record(
+            conn, current_user, "user.update_rate", "user", user_id,
+            f"Changed hourly rate for \"{user['username']}\" from {user['hourly_rate']} to {body.hourly_rate}"
+        )
         row = conn.execute(
             "SELECT id, username, role, hourly_rate FROM users WHERE id = ?", (user_id,)
         ).fetchone()
@@ -447,6 +461,10 @@ def create_entry(entry: EntryCreate, current_user=Depends(get_current_user)):
             (cursor.lastrowid,)
         ).fetchone())
         row["overtime"] = get_daily_total(conn, current_user["id"], entry.date) > 8
+        audit_log.record(
+            conn, current_user, "entry.create", "entry", cursor.lastrowid,
+            f"Logged {entry.hours}h \"{entry.activity}\" ({entry.category.value}) on {entry.date}"
+        )
     return row
 
 
@@ -463,6 +481,9 @@ def update_entry(entry_id: int, update: EntryUpdate, current_user=Depends(get_cu
             set_clause = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(f"UPDATE entries SET {set_clause} WHERE id = ?", list(fields.values()) + [entry_id])
             conn.commit()
+            changes = ", ".join(f"{k}: {existing[k]!r} → {v!r}" for k, v in fields.items())
+            audit_log.record(conn, current_user, "entry.update", "entry", entry_id,
+                              f"Updated entry #{entry_id} ({changes})")
         row = dict(conn.execute(
             "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE e.id = ?",
             (entry_id,)
@@ -481,6 +502,11 @@ def delete_entry(entry_id: int, current_user=Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="Not your entry")
         conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
         conn.commit()
+        audit_log.record(
+            conn, current_user, "entry.delete", "entry", entry_id,
+            f"Deleted entry #{entry_id} (\"{existing['activity']}\", {existing['hours']}h, "
+            f"{existing['category']}, {existing['date']})"
+        )
 
 
 @app.post("/entries/{entry_id}/approve", response_model=EntryResponse)
@@ -491,6 +517,8 @@ def approve_entry(entry_id: int, current_user=Depends(require_manager)):
             raise HTTPException(status_code=404, detail="Entry not found")
         conn.execute("UPDATE entries SET status = 'approved', rejection_reason = NULL WHERE id = ?", (entry_id,))
         conn.commit()
+        audit_log.record(conn, current_user, "entry.approve", "entry", entry_id,
+                          f"Approved entry #{entry_id} (\"{existing['activity']}\")")
         row = dict(conn.execute(
             "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE e.id = ?",
             (entry_id,)
@@ -510,6 +538,8 @@ def reject_entry(entry_id: int, body: RejectRequest, current_user=Depends(requir
             (body.reason, entry_id)
         )
         conn.commit()
+        audit_log.record(conn, current_user, "entry.reject", "entry", entry_id,
+                          f"Rejected entry #{entry_id} (\"{existing['activity']}\"): {body.reason}")
         row = dict(conn.execute(
             "SELECT e.*, u.username FROM entries e JOIN users u ON e.user_id = u.id WHERE e.id = ?",
             (entry_id,)
@@ -699,6 +729,8 @@ def clock_in(current_user=Depends(get_current_user)):
             (current_user["id"], now, now[:10])
         )
         conn.commit()
+        audit_log.record(conn, current_user, "clock_session.create", "clock_session", cursor.lastrowid,
+                          f"Clocked in at {now}")
         row = conn.execute(
             "SELECT * FROM clock_sessions WHERE id = ?", (cursor.lastrowid,)
         ).fetchone()
@@ -721,12 +753,14 @@ def clock_out(current_user=Depends(get_current_user)):
         )
         conn.commit()
         elapsed = (datetime.utcnow() - datetime.fromisoformat(active["clocked_in_at"])).total_seconds() / 3600
-    # Exact elapsed time, not rounded to the half-hour and not floored to
-    # 0.5h regardless of duration — a 3-minute session now logs ~0.05h,
-    # not 0.5h. The tiny floor below only guards against a session so short
-    # (a fraction of a second) that rounding to 2 decimals would hit exactly
-    # 0.00, which EntryCreate's hours > 0 validation would otherwise reject.
-    hours = max(0.01, round(elapsed, 2))
+        # Exact elapsed time, not rounded to the half-hour and not floored to
+        # 0.5h regardless of duration — a 3-minute session now logs ~0.05h,
+        # not 0.5h. The tiny floor below only guards against a session so short
+        # (a fraction of a second) that rounding to 2 decimals would hit exactly
+        # 0.00, which EntryCreate's hours > 0 validation would otherwise reject.
+        hours = max(0.01, round(elapsed, 2))
+        audit_log.record(conn, current_user, "clock_session.update", "clock_session", active["id"],
+                          f"Clocked out after {hours}h")
     return {"clocked_in_at": active["clocked_in_at"], "clocked_out_at": now, "hours": hours}
 
 
@@ -803,6 +837,13 @@ def update_clock_session(session_id: int, body: ClockSessionUpdate, current_user
             (clocked_in_at, clocked_out_at, clocked_in_at[:10], is_active, auto_closed, session_id)
         )
         conn.commit()
+        owner = conn.execute("SELECT username FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+        audit_log.record(
+            conn, current_user, "clock_session.correct", "clock_session", session_id,
+            f"Corrected clock session #{session_id} for \"{owner['username'] if owner else session['user_id']}\": "
+            f"clocked_in {session['clocked_in_at']} → {clocked_in_at}, "
+            f"clocked_out {session['clocked_out_at']} → {clocked_out_at}"
+        )
         row = conn.execute(
             "SELECT cs.*, u.username FROM clock_sessions cs JOIN users u ON cs.user_id = u.id WHERE cs.id = ?",
             (session_id,)
@@ -827,6 +868,8 @@ def create_team(body: TeamCreate, current_user=Depends(require_manager)):
             raise HTTPException(status_code=409, detail=f"A team named \"{body.name}\" already exists")
         cursor = conn.execute("INSERT INTO teams (name) VALUES (?)", (body.name,))
         conn.commit()
+        audit_log.record(conn, current_user, "team.create", "team", cursor.lastrowid,
+                          f"Created team \"{body.name}\"")
         return dict(conn.execute("SELECT * FROM teams WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
 
@@ -841,17 +884,22 @@ def update_team(team_id: int, body: TeamUpdate, current_user=Depends(require_man
             raise HTTPException(status_code=409, detail=f"A team named \"{body.name}\" already exists")
         conn.execute("UPDATE teams SET name = ? WHERE id = ?", (body.name, team_id))
         conn.commit()
+        audit_log.record(conn, current_user, "team.update", "team", team_id,
+                          f"Renamed team \"{team['name']}\" to \"{body.name}\"")
         return dict(conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone())
 
 
 @app.delete("/teams/{team_id}", status_code=204)
 def delete_team(team_id: int, current_user=Depends(require_manager)):
     with get_connection() as conn:
+        team = conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone()
         # Unassign any members rather than blocking deletion or cascading —
         # losing a team grouping shouldn't take people's other data with it.
         conn.execute("UPDATE users SET team_id = NULL WHERE team_id = ?", (team_id,))
         conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
         conn.commit()
+        audit_log.record(conn, current_user, "team.delete", "team", team_id,
+                          f"Deleted team \"{team['name'] if team else team_id}\" (members were unassigned, not removed)")
 
 
 @app.get("/rooms", response_model=list[RoomResponse])
@@ -872,6 +920,8 @@ def create_room(body: RoomCreate, current_user=Depends(require_manager)):
             (body.name, body.capacity, body.equipment, body.status)
         )
         conn.commit()
+        audit_log.record(conn, current_user, "room.create", "room", cursor.lastrowid,
+                          f"Created room \"{body.name}\"")
         return dict(conn.execute("SELECT * FROM rooms WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
 
@@ -890,14 +940,22 @@ def update_room(room_id: int, body: RoomUpdate, current_user=Depends(require_man
             (name, capacity, equipment, status, room_id)
         )
         conn.commit()
+        audit_log.record(
+            conn, current_user, "room.update", "room", room_id,
+            f"Updated room \"{room['name']}\": name={name!r}, capacity={capacity!r}, "
+            f"equipment={equipment!r}, status={status!r}"
+        )
         return dict(conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone())
 
 
 @app.delete("/rooms/{room_id}", status_code=204)
 def delete_room(room_id: int, current_user=Depends(require_manager)):
     with get_connection() as conn:
+        room = conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
         conn.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
         conn.commit()
+        audit_log.record(conn, current_user, "room.delete", "room", room_id,
+                          f"Deleted room \"{room['name'] if room else room_id}\"")
 
 
 @app.get("/rooms/{room_id}/occupancy", response_model=list[RoomOccupancySlot])
@@ -1314,6 +1372,18 @@ def create_meeting(body: MeetingCreate, background_tasks: BackgroundTasks, curre
 
         result = _meeting_with_attendees(conn, created_ids[0][0])
 
+        if recurrence_group_id:
+            audit_log.record(
+                conn, current_user, "meeting.create", "meeting", recurrence_group_id,
+                f"Scheduled recurring meeting \"{body.title}\" ({body.recurrence}, {len(created_ids)} occurrences, "
+                f"first on {body.date}, until {body.recurrence_until})"
+            )
+        else:
+            audit_log.record(
+                conn, current_user, "meeting.create", "meeting", created_ids[0][0],
+                f"Scheduled meeting \"{body.title}\" on {body.date} {body.start_time}-{body.end_time}"
+            )
+
     # Emails are queued to run *after* the response goes out — this is what
     # makes creating a meeting feel instant instead of blocking the request
     # on SMTP round-trips, which was making the very next fetch (the
@@ -1365,13 +1435,15 @@ def delete_meeting(meeting_id: int, current_user=Depends(get_current_user)):
         conn.execute("DELETE FROM meeting_attendees WHERE meeting_id = ?", (meeting_id,))
         conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
         conn.commit()
+        audit_log.record(conn, current_user, "meeting.cancel", "meeting", meeting_id,
+                          f"Cancelled meeting \"{m['title']}\" on {m['date']} {m['start_time']}-{m['end_time']}")
 
 
 @app.delete("/meetings/series/{group_id}", status_code=204)
 def delete_meeting_series(group_id: str, current_user=Depends(get_current_user)):
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, organizer_id FROM meetings WHERE recurrence_group_id = ?", (group_id,)
+            "SELECT id, organizer_id, title FROM meetings WHERE recurrence_group_id = ?", (group_id,)
         ).fetchall()
         if not rows:
             raise HTTPException(status_code=404, detail="Meeting series not found")
@@ -1381,6 +1453,8 @@ def delete_meeting_series(group_id: str, current_user=Depends(get_current_user))
         conn.executemany("DELETE FROM meeting_attendees WHERE meeting_id = ?", [(i,) for i in ids])
         conn.executemany("DELETE FROM meetings WHERE id = ?", [(i,) for i in ids])
         conn.commit()
+        audit_log.record(conn, current_user, "meeting.cancel_series", "meeting", group_id,
+                          f"Cancelled recurring meeting series \"{rows[0]['title']}\" ({len(ids)} occurrences)")
 
 
 def _email_reschedule_notices(m, organizer, body: MeetingReschedule, old_date, old_start, old_end,
@@ -1472,6 +1546,11 @@ def reschedule_meeting(meeting_id: int, body: MeetingReschedule, background_task
             (body.date, body.start_time, body.end_time, new_sequence, meeting_id)
         )
         conn.commit()
+        audit_log.record(
+            conn, current_user, "meeting.reschedule", "meeting", meeting_id,
+            f"Rescheduled meeting \"{m['title']}\" from {old_date} {old_start}-{old_end} "
+            f"to {body.date} {body.start_time}-{body.end_time}"
+        )
         organizer = conn.execute("SELECT id, username, email FROM users WHERE id = ?", (m["organizer_id"],)).fetchone()
         result = _meeting_with_attendees(conn, meeting_id)
         invitees = [dict(r) for r in conn.execute(
@@ -1505,6 +1584,12 @@ def rsvp_meeting(meeting_id: int, body: RSVPRequest, current_user=Depends(get_cu
             (body.status, reason, meeting_id, current_user["id"])
         )
         conn.commit()
+        meeting = conn.execute("SELECT title FROM meetings WHERE id = ?", (meeting_id,)).fetchone()
+        audit_log.record(
+            conn, current_user, "meeting.rsvp", "meeting", meeting_id,
+            f"{body.status.capitalize()} invite to \"{meeting['title'] if meeting else meeting_id}\""
+            + (f": {reason}" if reason else "")
+        )
         return _meeting_with_attendees(conn, meeting_id)
 
 
@@ -1565,6 +1650,12 @@ def rsvp_via_email_link(token: str, action: str):
             )
         conn.commit()
         meeting = conn.execute("SELECT title FROM meetings WHERE id = ?", (rows[0]["meeting_id"],)).fetchone()
+        actor_row = conn.execute("SELECT id, username FROM users WHERE id = ?", (rows[0]["user_id"],)).fetchone()
+        audit_log.record(
+            conn, dict(actor_row) if actor_row else None, "meeting.rsvp", "meeting", rows[0]["meeting_id"],
+            f"{status.capitalize()} invite to \"{meeting['title'] if meeting else 'the meeting'}\" via email link"
+            + (f" ({len(rows)} occurrences)" if len(rows) > 1 else "")
+        )
     title = "You're in! ✅" if status == "accepted" else "Response recorded"
     count_note = f" — all {len(rows)} occurrences in the series" if len(rows) > 1 else ""
     message = f'You have {status} the invite to "{meeting["title"] if meeting else "the meeting"}"{count_note}.'
@@ -1587,4 +1678,62 @@ def rsvp_add_decline_note(token: str = Form(...), reason: str = Form("")):
                 (reason.strip()[:500] or None, row["meeting_id"], row["user_id"])
             )
         conn.commit()
+        actor_row = conn.execute("SELECT id, username FROM users WHERE id = ?", (rows[0]["user_id"],)).fetchone()
+        audit_log.record(
+            conn, dict(actor_row) if actor_row else None, "meeting.rsvp", "meeting", rows[0]["meeting_id"],
+            f"Added a decline note via email link: {reason.strip()[:500] or '(cleared)'}"
+        )
     return HTMLResponse(_rsvp_confirmation_page("Thanks!", "Your note has been sent to the organizer."))
+
+# ── Audit log (manager only) ────────────────────────────────────────────────
+
+@app.get("/audit-log", response_model=list[AuditLogEntry])
+def get_audit_log(
+    response: Response,
+    entity_type: str = None,
+    action: str = None,
+    actor: str = None,
+    date_from: str = None,
+    date_to: str = None,
+    limit: int = None,
+    offset: int = 0,
+    current_user=Depends(require_manager)
+):
+    """Manager-only view over every create/update/delete recorded by
+    audit_log.record(). Filters/pagination follow the same shape as
+    GET /entries (X-Total-Count header + limit/offset) for frontend
+    consistency. `date_from`/`date_to` compare against the date portion of
+    `created_at` (which is stored as an ISO datetime), not the whole
+    timestamp, so a single day's range is inclusive of every entry from
+    that day regardless of time of day."""
+    query = "SELECT * FROM audit_log WHERE 1=1"
+    params = []
+    if entity_type:
+        query += " AND entity_type = ?"
+        params.append(entity_type)
+    if action:
+        query += " AND action = ?"
+        params.append(action)
+    if actor:
+        query += " AND actor_username LIKE ?"
+        params.append(f"%{actor}%")
+    if date_from:
+        query += " AND substr(created_at, 1, 10) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND substr(created_at, 1, 10) <= ?"
+        params.append(date_to)
+
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)", 1)
+
+    query += " ORDER BY id DESC"
+    query_params = params
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        query_params = params + [limit, offset]
+
+    with get_connection() as conn:
+        total = conn.execute(count_query, params).fetchone()[0]
+        response.headers["X-Total-Count"] = str(total)
+        rows = [dict(r) for r in conn.execute(query, query_params).fetchall()]
+    return rows
