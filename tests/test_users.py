@@ -4,6 +4,7 @@ creating/deleting people, profile/rate updates, and the team + room
 directories used when scheduling meetings.
 """
 import sqlite3
+from datetime import date, timedelta
 
 
 def _create_intern(client, manager_headers, username="new_intern", **overrides):
@@ -205,9 +206,15 @@ def test_update_nonexistent_room_404(client, manager_headers):
 
 
 def test_room_occupancy_shows_bookings_in_range(client, manager_headers):
+    """Uses a date relative to today, not a hardcoded one — the endpoint
+    defaults its window to today through 30 days out (see main.py), so a
+    fixed past-tense date would eventually age out of that window and
+    make this test fail for reasons that have nothing to do with a
+    regression."""
+    booking_date = (date.today() + timedelta(days=5)).isoformat()
     client.post("/rooms", headers=manager_headers, json={"name": "Room D"})
     r = client.post("/meetings", headers=manager_headers, json={
-        "title": "Standup", "date": "2026-09-01", "start_time": "09:00", "end_time": "09:30",
+        "title": "Standup", "date": booking_date, "start_time": "09:00", "end_time": "09:30",
         "location_type": "in_person", "room": "Room D", "attendee_ids": []
     })
     assert r.status_code == 201

@@ -214,6 +214,22 @@ class AuditLogEntry(BaseModel):
     summary: str
 
 
+class InternDashboardSummary(BaseModel):
+    user_id: int
+    username: str
+    hours_today: float
+    hours_week: float
+    behind_on_logging_dates: list[str] = []
+    near_overtime: bool = False
+
+
+class TeamSummary(BaseModel):
+    total_hours_week: float
+    pending_approvals_count: int
+    overtime_days_this_week: int
+    interns: list[InternDashboardSummary]
+
+
 class ForgotPasswordRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=50)
 

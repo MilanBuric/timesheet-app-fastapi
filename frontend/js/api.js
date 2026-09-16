@@ -370,6 +370,13 @@ const api = (() => {
     return res.json();
   }
 
+  async function getTeamSummary(clientDate = null) {
+    const qs = clientDate ? `?client_date=${clientDate}` : "";
+    const res = await request("GET", `/dashboard/team-summary${qs}`);
+    if (!res.ok) throw new Error("Failed to fetch team summary");
+    return res.json();
+  }
+
   async function getAuditLog(params = {}) {
     const qs = new URLSearchParams(
       Object.fromEntries(
@@ -428,5 +435,6 @@ const api = (() => {
     forgotPassword,
     resetPassword,
     getAuditLog,
+    getTeamSummary,
   };
 })();

@@ -15,7 +15,7 @@ from models import (EntryCreate, EntryUpdate, EntryResponse, StatsResponse,
                     RSVPRequest, MeetingReschedule, RoomCreate, RoomUpdate, RoomResponse,
                     RoomOccupancySlot, ForgotPasswordRequest, ResetPasswordRequest,
                     ClockSessionResponse, ClockSessionUpdate, UpdateUserProfileRequest,
-                    TeamCreate, TeamUpdate, TeamResponse, AuditLogEntry)
+                    TeamCreate, TeamUpdate, TeamResponse, AuditLogEntry, TeamSummary, InternDashboardSummary)
 from auth import verify_password, create_token, get_current_user, require_manager
 import email_utils
 import google_meet
@@ -398,6 +398,7 @@ def get_entries(
     date_from: str = None,
     date_to: str = None,
     category: str = None,
+    status: str = None,
     limit: int = None,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -416,6 +417,9 @@ def get_entries(
     if category:
         query += " AND e.category = ?"
         params.append(category)
+    if status:
+        query += " AND e.status = ?"
+        params.append(status)
 
     count_query = query.replace("SELECT e.*, u.username", "SELECT COUNT(*)", 1)
 
@@ -576,6 +580,89 @@ def get_stats(client_date: str = None, current_user=Depends(get_current_user)):
                 "SELECT COUNT(*) FROM entries WHERE user_id = ?", (uid,)
             ).fetchone()[0]
     return StatsResponse(hours_today=round(today_hours, 2), hours_week=round(week_hours, 2), total_entries=total)
+
+
+@app.get("/dashboard/team-summary", response_model=TeamSummary)
+def get_team_summary(client_date: str = None, current_user=Depends(require_manager)):
+    """Manager-only dashboard widget data: team-wide stats for the current
+    week (Monday through today, same week boundary as /stats) plus a
+    per-intern breakdown. Two things are intentionally scoped to "this
+    week" rather than all-time, to keep this fast and keep the numbers
+    actionable rather than an ever-growing historical pile:
+      - behind_on_logging_dates: days THIS WEEK where the intern has
+        clocked time but no entry logged for that date. A day from a
+        month ago with no entry isn't something a manager can still act
+        on; a day from this week is.
+      - overtime_days_this_week: count of (intern, day) pairs this week
+        where clocked hours exceeded 8h — the same threshold entries.py's
+        overtime flag already uses, just counted in aggregate here.
+    near_overtime is the one real-time signal here: it only looks at
+    RIGHT NOW, not the week — a session that's already ended either was
+    or wasn't overtime, nothing "near" about it anymore.
+    """
+    today = client_date if client_date else date.today().isoformat()
+    try:
+        today_dt = datetime.strptime(today, "%Y-%m-%d").date()
+    except ValueError:
+        today_dt = date.today()
+    week_start = (today_dt - timedelta(days=today_dt.weekday())).isoformat()
+    today = today_dt.isoformat()
+
+    with get_connection() as conn:
+        interns = conn.execute("SELECT id, username FROM users WHERE role = 'intern'").fetchall()
+        intern_ids = [u["id"] for u in interns]
+
+        by_day = _get_clocked_hours_by_day_batch(conn, intern_ids, week_start, today) if intern_ids else {}
+
+        entry_rows = conn.execute(
+            f"""SELECT user_id, date FROM entries
+                WHERE user_id IN ({','.join('?' for _ in intern_ids)}) AND date >= ? AND date <= ?""",
+            intern_ids + [week_start, today]
+        ).fetchall() if intern_ids else []
+        entry_dates_by_user = {}
+        for row in entry_rows:
+            entry_dates_by_user.setdefault(row["user_id"], set()).add(row["date"])
+
+        active_sessions = conn.execute(
+            f"""SELECT user_id, clocked_in_at FROM clock_sessions
+                WHERE user_id IN ({','.join('?' for _ in intern_ids)}) AND is_active = 1""",
+            intern_ids
+        ).fetchall() if intern_ids else []
+        near_overtime_users = set()
+        for s in active_sessions:
+            elapsed = (datetime.utcnow() - datetime.fromisoformat(s["clocked_in_at"])).total_seconds() / 3600
+            if elapsed >= 7:
+                near_overtime_users.add(s["user_id"])
+
+        pending_approvals_count = conn.execute(
+            "SELECT COUNT(*) FROM entries WHERE status = 'pending'"
+        ).fetchone()[0]
+
+        total_hours_week = 0.0
+        overtime_days_this_week = 0
+        intern_summaries = []
+        for u in interns:
+            user_days = by_day.get(u["id"], {})
+            hours_week = sum(user_days.values())
+            hours_today = user_days.get(today, 0.0)
+            total_hours_week += hours_week
+            overtime_days_this_week += sum(1 for h in user_days.values() if h > 8)
+            clocked_dates = set(user_days.keys())
+            logged_dates = entry_dates_by_user.get(u["id"], set())
+            behind_dates = sorted(clocked_dates - logged_dates)
+            intern_summaries.append(InternDashboardSummary(
+                user_id=u["id"], username=u["username"],
+                hours_today=round(hours_today, 2), hours_week=round(hours_week, 2),
+                behind_on_logging_dates=behind_dates,
+                near_overtime=u["id"] in near_overtime_users
+            ))
+
+    return TeamSummary(
+        total_hours_week=round(total_hours_week, 2),
+        pending_approvals_count=pending_approvals_count,
+        overtime_days_this_week=overtime_days_this_week,
+        interns=intern_summaries
+    )
 
 
 # ── Weekly report ─────────────────────────────────────────────────────────────

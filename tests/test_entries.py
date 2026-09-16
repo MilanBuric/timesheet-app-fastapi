@@ -145,3 +145,20 @@ def test_overtime_flag_based_on_clocked_hours_not_entry_hours(client, intern_hea
     # No clock session exists for this date, so this must NOT be flagged
     # as overtime even though the logged hours (20) exceed 8.
     assert r.json()["overtime"] is False
+
+# ── Status filter ──────────────────────────────────────────────────────────
+
+def test_entries_status_filter(client, intern_headers, manager_headers):
+    r1 = client.post("/entries", headers=intern_headers, json=_entry_body(activity="Stays pending"))
+    r2 = client.post("/entries", headers=intern_headers, json=_entry_body(activity="Gets approved", date="2026-08-21"))
+    client.post(f"/entries/{r2.json()['id']}/approve", headers=manager_headers)
+
+    r = client.get("/entries?status=pending", headers=manager_headers)
+    activities = {e["activity"] for e in r.json()}
+    assert "Stays pending" in activities
+    assert "Gets approved" not in activities
+
+    r = client.get("/entries?status=approved", headers=manager_headers)
+    activities = {e["activity"] for e in r.json()}
+    assert "Gets approved" in activities
+    assert "Stays pending" not in activities

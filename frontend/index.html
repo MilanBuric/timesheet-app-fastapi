@@ -433,6 +433,46 @@
               <p class="stat-value" id="stat-entries">—</p>
             </div>
           </div>
+          <div class="stats-grid manager-only hidden">
+            <div class="stat-card">
+              <p class="stat-label">Pending approvals</p>
+              <p class="stat-value" id="stat-pending-approvals">—</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-label">Overtime days this week</p>
+              <p class="stat-value" id="stat-overtime-days">—</p>
+            </div>
+          </div>
+          <div class="card manager-only hidden">
+            <h2 class="card-title">Pending approvals</h2>
+            <p class="card-subtitle">
+              Entries waiting on your review, oldest first.
+            </p>
+            <div id="dashboard-pending-container"></div>
+          </div>
+          <div class="card manager-only hidden">
+            <h2 class="card-title">Team status</h2>
+            <p class="card-subtitle">
+              This week's clocked hours per intern, days with clocked time but
+              no entry logged, and anyone about to hit overtime today.
+            </p>
+            <div id="team-status-container"></div>
+          </div>
+          <div class="card manager-only hidden">
+            <h2 class="card-title">Recent activity</h2>
+            <p class="card-subtitle">
+              Latest actions from the audit log.
+              <a
+                href="#"
+                onclick="
+                  app.goToAuditLog();
+                  return false;
+                "
+                >View full audit log →</a
+              >
+            </p>
+            <div id="dashboard-audit-container"></div>
+          </div>
           <div class="card intern-only">
             <h2 class="card-title">Log a task</h2>
             <p class="card-subtitle">

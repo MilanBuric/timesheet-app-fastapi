@@ -238,7 +238,12 @@ const app = (() => {
     document.getElementById("entry-date").value = today();
     setupNav();
     document.getElementById("clock-btn").addEventListener("click", toggleClock);
-    await Promise.all([loadStats(), loadRecentEntries(), restoreTimer()]);
+    await Promise.all([
+      loadStats(),
+      loadRecentEntries(),
+      loadTeamSummary(),
+      restoreTimer(),
+    ]);
   }
 
   function today() {
@@ -408,6 +413,75 @@ const app = (() => {
     } catch (err) {
       console.error("Stats error:", err);
     }
+  }
+
+  // ── Manager dashboard widgets ────────────────────────────────────────────
+
+  function formatDateShort(d) {
+    const [y, m, day] = d.split("-");
+    return new Date(y, m - 1, day).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    });
+  }
+
+  function renderTeamStatus(interns) {
+    const container = document.getElementById("team-status-container");
+    if (!interns.length) {
+      container.innerHTML = '<div class="empty">No interns yet.</div>';
+      return;
+    }
+    container.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Intern</th><th>Today</th><th>This week</th><th>Logging gaps</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${interns
+              .map(
+                (i) => `
+              <tr>
+                <td>${i.username}</td>
+                <td class="td-hours">${i.hours_today.toFixed(1)}h</td>
+                <td class="td-hours">${i.hours_week.toFixed(1)}h</td>
+                <td>${
+                  i.behind_on_logging_dates.length
+                    ? `<span class="badge badge-rejected" title="${i.behind_on_logging_dates.join(", ")}">${i.behind_on_logging_dates.length} day${i.behind_on_logging_dates.length > 1 ? "s" : ""} — ${i.behind_on_logging_dates.map(formatDateShort).join(", ")}</span>`
+                    : '<span class="badge badge-approved">Up to date</span>'
+                }</td>
+                <td>${i.near_overtime ? '<span class="overtime-flag" title="Clocked in 7h+ so far today">⚠️ Near overtime</span>' : ""}</td>
+              </tr>
+            `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  async function loadTeamSummary() {
+    if (currentUser.role !== "manager") return;
+    try {
+      const [summary, pending, recentAudit] = await Promise.all([
+        api.getTeamSummary(),
+        api.getEntries({ status: "pending" }),
+        api.getAuditLog({ limit: 5 }),
+      ]);
+      document.getElementById("stat-pending-approvals").textContent =
+        summary.pending_approvals_count;
+      document.getElementById("stat-overtime-days").textContent =
+        summary.overtime_days_this_week;
+      renderTeamStatus(summary.interns);
+      entries.renderTable(pending, "dashboard-pending-container", true);
+      audit.renderTable(recentAudit.data, "dashboard-audit-container");
+    } catch (err) {
+      console.error("Team summary error:", err);
+    }
+  }
+
+  function goToAuditLog() {
+    document.querySelector('.nav-item[data-view="audit-log"]').click();
   }
 
   // ── Entries ───────────────────────────────────────────────────────────────
@@ -663,8 +737,13 @@ const app = (() => {
   async function refreshEntriesResilient(includeEntriesList = false) {
     const doRefresh = () =>
       includeEntriesList
-        ? Promise.all([loadStats(), loadRecentEntries(), loadEntries()])
-        : Promise.all([loadStats(), loadRecentEntries()]);
+        ? Promise.all([
+            loadStats(),
+            loadRecentEntries(),
+            loadTeamSummary(),
+            loadEntries(),
+          ])
+        : Promise.all([loadStats(), loadRecentEntries(), loadTeamSummary()]);
     try {
       await doRefresh();
     } catch {
@@ -2175,5 +2254,6 @@ const app = (() => {
     submitResetPassword,
     loadAuditLog,
     goToAuditLogPage,
+    goToAuditLog,
   };
 })();
